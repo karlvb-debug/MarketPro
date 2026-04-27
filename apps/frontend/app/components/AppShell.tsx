@@ -14,6 +14,7 @@ import { WorkspaceProvider } from '../lib/workspace';
 import { MobileNavProvider } from './MobileNav';
 import { MobileHeader } from './MobileHeader';
 import { ToastProvider } from './Toast';
+import { ConfirmProvider } from './ConfirmDialog';
 import Sidebar from './Sidebar';
 
 export default function AppShell({ children }: { children: ReactNode }) {
@@ -58,13 +59,15 @@ export default function AppShell({ children }: { children: ReactNode }) {
     <WorkspaceProvider>
       <MobileNavProvider>
         <ToastProvider>
-          <div className="app-layout">
-            <MobileHeader />
-            <Sidebar />
-            <main className="app-content">
-              {children}
-            </main>
-          </div>
+          <ConfirmProvider>
+            <div className="app-layout">
+              <MobileHeader />
+              <Sidebar />
+              <main className="app-content">
+                {children}
+              </main>
+            </div>
+          </ConfirmProvider>
         </ToastProvider>
       </MobileNavProvider>
     </WorkspaceProvider>

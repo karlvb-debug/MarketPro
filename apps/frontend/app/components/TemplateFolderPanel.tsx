@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react';
 import { useStore, TemplateFolder, EmailTemplate, SmsTemplate, VoiceScript, WebForm } from '../lib/store';
 import { showToast } from './Toast';
+import { useConfirm } from './ConfirmDialog';
 
 interface TemplateFolderPanelProps {
   activeFolderId: string | null; // null = "All Templates"
@@ -17,6 +18,7 @@ function getTemplateId(t: any): string {
 
 export default function TemplateFolderPanel({ activeFolderId, activeType, onSelectFolder }: TemplateFolderPanelProps) {
   const store = useStore();
+  const confirm = useConfirm();
   const { templates, templateFolders } = store;
 
   const [search, setSearch] = useState('');
@@ -82,8 +84,9 @@ export default function TemplateFolderPanel({ activeFolderId, activeType, onSele
           <span className="sp-folder-name">{folder.name}</span>
           <span className="sp-item-count">{count}</span>
           <div className="sp-item-actions" onClick={(e) => e.stopPropagation()}>
-            <button className="sp-action-btn" title="Delete folder" onClick={() => {
-              if (confirm(`Delete folder "${folder.name}"? Templates inside will become uncategorized.`)) {
+            <button className="sp-action-btn" title="Delete folder" onClick={async () => {
+              const ok = await confirm(`Delete folder "${folder.name}"? Templates inside will become uncategorized.`, { title: 'Delete Folder', variant: 'danger' });
+              if (ok) {
                 store.deleteTemplateFolder(folder.folderId);
                 if (activeFolderId === folder.folderId) onSelectFolder(null);
                 showToast(`Folder "${folder.name}" deleted`);

@@ -615,6 +615,8 @@ export function useStore() {
     let skipped = 0;
     let blankSkipped = 0;
 
+    const created: Contact[] = [];
+
     setData((prev) => {
       // Clone existing contacts for mutation
       const updatedContacts = [...prev.contacts];
@@ -633,7 +635,6 @@ export function useStore() {
       const batchEmails = new Set<string>();
       const batchPhones = new Set<string>();
 
-      const created: Contact[] = [];
 
       for (const c of newContacts) {
         // Skip blank/unidentifiable contacts
@@ -658,16 +659,21 @@ export function useStore() {
 
         if (matchIdx >= 0) {
           // UPDATE existing record — merge in new data (prefer non-empty values)
-          const existing = updatedContacts[matchIdx]!;
+          const existing = updatedContacts[matchIdx];
+          if (!existing) {
+            // matchIdx points into the `created` batch — treat as duplicate, skip
+            skipped++;
+            continue;
+          }
           updatedContacts[matchIdx] = {
             ...existing,
             firstName: c.firstName?.trim() || existing.firstName,
             lastName: c.lastName?.trim() || existing.lastName,
             email: emailNorm || existing.email,
             phone: phoneNorm ? c.phone : existing.phone,
-            company: c.company?.trim() || existing.company,
-            timezone: c.timezone?.trim() || existing.timezone,
-            segments: [...new Set([...existing.segments, ...(c.segments || [])])],
+            company: c.company?.trim() || existing.company || '',
+            timezone: c.timezone?.trim() || existing.timezone || '',
+            segments: [...new Set([...(existing.segments || []), ...(c.segments || [])])],
           };
           // Update indexes with the merged contact's values
           if (emailNorm) emailIndex.set(emailNorm, matchIdx);
@@ -702,8 +708,15 @@ export function useStore() {
       return { ...prev, contacts: [...created, ...updatedContacts] };
     });
 
+    // Persist new contacts to API (fire-and-forget, don't block import)
+    if (created.length > 0) {
+      for (const c of created) {
+        apiCall(() => api.contacts.create(contactToApi(c)));
+      }
+    }
+
     return { added, updated, skipped, blankSkipped };
-  }, []);
+  }, [apiCall]);
 
   // ---- CAMPAIGNS ----
 

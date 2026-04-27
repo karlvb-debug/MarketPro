@@ -8,6 +8,7 @@ import EmptyState from '../components/EmptyState';
 import Modal from '../components/Modal';
 import { FormField, FormInput, FormTextarea, FormActions } from '../components/FormElements';
 import { showToast } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
 
 type ContentType = 'email' | 'sms' | 'voice' | 'webform';
 
@@ -23,6 +24,7 @@ const TYPE_LABELS: Record<ContentType, { singular: string; plural: string; icon:
 
 export default function TemplatesPage() {
   const store = useStore();
+  const confirm = useConfirm();
   const { templates, templateFolders, hydrated } = store;
 
   // Panel state
@@ -104,8 +106,9 @@ export default function TemplatesPage() {
     else if (activeType === 'webform') setShowNewWebForm(true);
   };
 
-  const handleDeleteItem = (id: string) => {
-    if (confirm(`Delete this ${labels.singular.toLowerCase()}?`)) {
+  const handleDeleteItem = async (id: string) => {
+    const ok = await confirm(`Delete this ${labels.singular.toLowerCase()}?`, { title: `Delete ${labels.singular}`, variant: 'danger' });
+    if (ok) {
       store.deleteTemplate(id, activeType);
       if (previewId === id) setPreviewId(null);
       showToast(`${labels.singular} deleted`);

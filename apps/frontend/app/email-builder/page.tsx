@@ -13,6 +13,7 @@ import {
 import { compileToHtml, validateEmailCompliance } from '../lib/email-compiler';
 import EmailBlockEditor from '../components/EmailBlockEditor';
 import { useStore } from '../lib/store';
+import { useConfirm } from '../components/ConfirmDialog';
 
 const STORAGE_KEY = 'clq-email-design';
 
@@ -52,6 +53,7 @@ export default function EmailBuilderPage() {
   const formId = searchParams.get('formId');
   const mode = searchParams.get('mode') === 'form' ? 'form' : 'email' as const;
   const store = useStore();
+  const confirm = useConfirm();
 
   // If we have a templateId, look up the template name
   const linkedTemplate = templateId
@@ -136,8 +138,9 @@ export default function EmailBuilderPage() {
     }
   }, [mode, formId, store]);
 
-  const handleNewTemplate = () => {
-    if (confirm('Start fresh? Your current work will be lost.')) {
+  const handleNewTemplate = async () => {
+    const ok = await confirm('Start fresh? Your current work will be lost.', { title: 'New Template', confirmLabel: 'Start Fresh' });
+    if (ok) {
       localStorage.removeItem(STORAGE_KEY);
       setDesign(null);
       setView('gallery');
@@ -153,8 +156,9 @@ export default function EmailBuilderPage() {
     setSaveName('');
   };
 
-  const handleDeleteSavedTemplate = (id: string) => {
-    if (!confirm('Delete this saved template?')) return;
+  const handleDeleteSavedTemplate = async (id: string) => {
+    const ok = await confirm('Delete this saved template?', { title: 'Delete Template', variant: 'danger' });
+    if (!ok) return;
     deleteSavedTemplate(id);
     refreshSavedTemplates();
   };
@@ -182,12 +186,16 @@ export default function EmailBuilderPage() {
     const errors = warnings.filter((w) => w.severity === 'error');
 
     if (errors.length > 0) {
-      const proceed = confirm(
-        `⚠️ Compliance Issues Detected:\n\n${errors.map((e) => `• ${e.message}`).join('\n')}\n\nExport anyway?`
+      const proceed = await confirm(
+        `⚠️ Compliance Issues Detected:\n\n${errors.map((e) => `• ${e.message}`).join('\n')}\n\nExport anyway?`,
+        { title: 'Compliance Warning', variant: 'danger', confirmLabel: 'Export Anyway' }
       );
       if (!proceed) return;
     } else if (warnings.length > 0) {
-      alert(`📝 Compliance Notes:\n\n${warnings.map((w) => `• ${w.message}`).join('\n')}`);
+      await confirm(
+        `📝 Compliance Notes:\n\n${warnings.map((w) => `• ${w.message}`).join('\n')}`,
+        { title: 'Compliance Notes', confirmLabel: 'OK' }
+      );
     }
 
     setExporting(true);

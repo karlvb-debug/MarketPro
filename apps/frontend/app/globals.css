@@ -2241,6 +2241,175 @@ a:hover {
 }
 
 /* ============================================
+   FILTER BAR
+   ============================================ */
+
+.filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border-primary);
+  background: var(--bg-secondary);
+  min-height: 40px;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  transition: box-shadow 0.15s ease;
+}
+
+.filter-chip:hover {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.filter-chip-label {
+  padding: var(--space-1) var(--space-2);
+  background: var(--accent);
+  color: white;
+  font-weight: 600;
+  white-space: nowrap;
+  font-size: 11px;
+  letter-spacing: 0.01em;
+}
+
+.filter-chip-operator {
+  padding: var(--space-1) var(--space-1);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  outline: none;
+  border-right: 1px solid var(--border-primary);
+  -webkit-appearance: none;
+}
+
+.filter-chip-operator:focus {
+  background: var(--bg-hover);
+}
+
+.filter-chip-value {
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 11px;
+  min-width: 80px;
+  max-width: 160px;
+  outline: none;
+}
+
+.filter-chip-value:focus {
+  background: var(--bg-hover);
+}
+
+.filter-chip-value::placeholder {
+  color: var(--text-tertiary);
+}
+
+.filter-chip-remove {
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  border-left: 1px solid var(--border-primary);
+  transition: all 0.1s;
+}
+
+.filter-chip-remove:hover {
+  background: var(--danger);
+  color: white;
+}
+
+/* Add filter button */
+.filter-add-wrapper {
+  position: relative;
+}
+
+.filter-add-btn {
+  padding: var(--space-1) var(--space-2);
+  border: 1px dashed var(--border-secondary);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.filter-add-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(99, 102, 241, 0.05);
+}
+
+/* Filter dropdown */
+.filter-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  margin-top: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  min-width: 180px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: var(--space-1) 0;
+  animation: confirm-pop 0.15s ease;
+}
+
+.filter-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.filter-dropdown-item:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+/* Clear all button */
+.filter-clear-btn {
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+
+.filter-clear-btn:hover {
+  color: var(--danger);
+}
+
+/* ============================================
    TOOLBAR (reusable)
    ============================================ */
 
@@ -5291,4 +5460,65 @@ a:hover {
   padding: 1px 4px;
   border-radius: 3px;
   font-size: inherit;
+}
+
+/* ============================================
+   CONFIRM DIALOG
+   ============================================ */
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  z-index: 9998;
+  animation: fadeIn 0.15s ease;
+}
+
+.confirm-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 9999;
+  background: var(--bg-card);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  width: 100%;
+  max-width: 400px;
+  animation: confirm-pop 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  overflow: hidden;
+}
+
+@keyframes confirm-pop {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+.confirm-body {
+  padding: var(--space-5) var(--space-6);
+}
+
+.confirm-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 var(--space-2) 0;
+}
+
+.confirm-message {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-6);
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-primary);
 }

@@ -3,16 +3,47 @@
 // CSV parsing, column mapping, data sanitization
 // ============================================
 
-export const SYSTEM_FIELDS = {
-  firstName: { label: 'First Name', required: false },
-  lastName: { label: 'Last Name', required: false },
-  email: { label: 'Email Address', required: false },
-  phone: { label: 'Phone Number', required: false },
-  company: { label: 'Company', required: false },
-  timezone: { label: 'Timezone', required: false },
-} as const;
+// ---- Phone Validation & Normalization ----
+// Returns { valid: true, normalized: '+1...' } or { valid: false, error: 'message' }
 
-export type SystemFieldKey = keyof typeof SYSTEM_FIELDS;
+export function validatePhone(raw: string): { valid: true; normalized: string } | { valid: false; error: string } {
+  const trimmed = raw.trim();
+  if (!trimmed) return { valid: true, normalized: '' }; // empty is OK (optional field)
+
+  const digits = trimmed.replace(/\D/g, '');
+
+  if (digits.length < 7) {
+    return { valid: false, error: 'Phone number is too short (minimum 7 digits).' };
+  }
+
+  // US/CA: 10 digits (no country code) or 11 starting with 1
+  if (digits.length === 10) {
+    return { valid: true, normalized: `+1${digits}` };
+  }
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return { valid: true, normalized: `+${digits}` };
+  }
+
+  // International: 7-13 digits (E.164 max is 15 incl. country code, but real numbers are ≤13)
+  if (digits.length > 13) {
+    return { valid: false, error: `Phone number is too long (${digits.length} digits). US numbers should be 10 digits, international max 13.` };
+  }
+
+  // Normalize: add + prefix if missing
+  const normalized = trimmed.startsWith('+') ? `+${digits}` : `+${digits}`;
+  return { valid: true, normalized };
+}
+
+export const SYSTEM_FIELDS = [
+  { key: 'firstName' as const, label: 'First Name', required: false },
+  { key: 'lastName' as const, label: 'Last Name', required: false },
+  { key: 'email' as const, label: 'Email Address', required: false },
+  { key: 'phone' as const, label: 'Phone Number', required: false },
+  { key: 'company' as const, label: 'Company', required: false },
+  { key: 'timezone' as const, label: 'Timezone', required: false },
+];
+
+export type SystemFieldKey = typeof SYSTEM_FIELDS[number]['key'];
 
 export interface ImportIssue {
   field: string;

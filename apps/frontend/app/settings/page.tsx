@@ -9,6 +9,7 @@ import { Card } from '../components/DataTable';
 import { FormField, FormInput, FormSelect, FormActions, CheckboxChip } from '../components/FormElements';
 import Modal from '../components/Modal';
 import { showToast } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
 
 // ============================================
 // Field type config
@@ -30,6 +31,7 @@ const FIELD_TYPES = [
 
 export default function SettingsPage() {
   const store = useStore();
+  const confirm = useConfirm();
   const { activeWorkspace, renameWorkspace, deleteWorkspace, workspaces } = useWorkspace();
   const [activeTab, setActiveTab] = useState('general');
   const [showAddField, setShowAddField] = useState(false);
@@ -385,8 +387,9 @@ export default function SettingsPage() {
               <h3 className="text-primary font-medium" style={{ fontSize: 'var(--text-sm)', marginBottom: 'var(--space-1)' }}>Reset Workspace Data</h3>
               <p className="text-tertiary" style={{ fontSize: 'var(--text-xs)' }}>Restore this workspace to its default seed data. All contacts, campaigns, and templates will be replaced.</p>
             </div>
-            <button className="btn btn-danger btn-sm" onClick={() => {
-              if (confirm('This will reset ALL data in this workspace to defaults. Are you sure?')) {
+            <button className="btn btn-danger btn-sm" onClick={async () => {
+              const ok = await confirm('This will reset ALL data in this workspace to defaults. Are you sure?', { title: 'Reset Workspace', variant: 'danger', confirmLabel: 'Reset Data' });
+              if (ok) {
                 store.resetData();
                 showToast('Workspace data reset to defaults', 'info');
               }
@@ -399,8 +402,9 @@ export default function SettingsPage() {
                 <h3 className="text-primary font-medium" style={{ fontSize: 'var(--text-sm)', marginBottom: 'var(--space-1)' }}>Delete Workspace</h3>
                 <p className="text-tertiary" style={{ fontSize: 'var(--text-xs)' }}>Permanently delete &quot;{activeWorkspace.name}&quot; and all its data. You cannot undo this.</p>
               </div>
-              <button className="btn btn-danger btn-sm" onClick={() => {
-                if (confirm(`Permanently delete "${activeWorkspace.name}"? This cannot be undone.`)) {
+              <button className="btn btn-danger btn-sm" onClick={async () => {
+                const ok = await confirm(`Permanently delete "${activeWorkspace.name}"? This cannot be undone.`, { title: 'Delete Workspace', variant: 'danger', confirmLabel: 'Delete Workspace' });
+                if (ok) {
                   deleteWorkspace(activeWorkspace.workspaceId);
                   showToast(`Workspace "${activeWorkspace.name}" deleted`, 'info');
                 }
