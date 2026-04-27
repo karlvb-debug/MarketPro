@@ -1,0 +1,24 @@
+{
+  "MarketingSaaSDatabaseStack": {
+    "ExportsOutputFnGetAttMarketingSaaSDB5A7FD9A5EndpointAddressAB1AB6CC": "marketingsaasdatabasestack-marketingsaasdb5a7fd9a5-z1ndacik1dkn.ci9aqe646vif.us-east-1.rds.amazonaws.com",
+    "ExportsOutputFnGetAttIdempotencyStore93A8D2D5Arn6C728802": "arn:aws:dynamodb:us-east-1:185011027929:table/MarketingSaaSDatabaseStack-IdempotencyStore93A8D2D5-1JQ7NSZKX1XYK",
+    "ExportsOutputRefMarketingSaaSVpcPrivateSubnet2Subnet3FABA82D0031F049": "subnet-000727d739152ded2",
+    "ExportsOutputRefIdempotencyStore93A8D2D524CACCC3": "MarketingSaaSDatabaseStack-IdempotencyStore93A8D2D5-1JQ7NSZKX1XYK",
+    "DynamoDbIdempotencyTableName": "MarketingSaaSDatabaseStack-IdempotencyStore93A8D2D5-1JQ7NSZKX1XYK",
+    "RdsEndpoint": "marketingsaasdatabasestack-marketingsaasdb5a7fd9a5-z1ndacik1dkn.ci9aqe646vif.us-east-1.rds.amazonaws.com",
+    "ExportsOutputRefMarketingSaaSVpcPrivateSubnet1Subnet4B7DA8A73F5546F3": "subnet-0d2e1cf35b29f5b15",
+    "ExportsOutputRefMarketingSaaSDBSecretAttachmentA2784BADA5A42437": "arn:aws:secretsmanager:us-east-1:185011027929:secret:marketing-saas/rds-credentials-clhqzd",
+    "ExportsOutputFnGetAttLambdaSecurityGroup0BD9FC99GroupId34A98CFB": "sg-04d14e1cd8ad15431"
+  },
+  "MarketingSaaSAuthStack": {
+    "UserPoolClientId": "36p6srq75ol7t4ideuig36te54",
+    "UserPoolId": "us-east-1_5IPB9ya7e",
+    "ExportsOutputRefMarketingSaaSUserPool00CA9C6E6C3C9432": "us-east-1_5IPB9ya7e",
+    "ExportsOutputRefMarketingSaaSWebClientD7B4DD720A65D5A2": "36p6srq75ol7t4ideuig36te54"
+  },
+  "MarketingSaaSApiStack": {
+    "ApiGatewayUrl": "https://e10jojfki9.execute-api.us-east-1.amazonaws.com/prod/",
+    "MarketingSaaSAPIEndpoint8FC3B405": "https://e10jojfki9.execute-api.us-east-1.amazonaws.com/prod/",
+    "MigrateFunctionName": "MarketingSaaSApiStack-DbMigrateFunctionCC81083B-ep4EO7uhFmqd"
+  }
+}
