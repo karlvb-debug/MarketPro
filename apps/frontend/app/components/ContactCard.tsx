@@ -5,6 +5,8 @@ import type { Contact, SuppressionReason, ContactCompliance, ChannelStatus } fro
 import { getOverallStatus } from '../lib/store';
 import { ComplianceBadges } from './StatusBadge';
 import { FormInput, FormSelect } from './FormElements';
+import { showToast } from './Toast';
+import { validatePhone } from '../lib/contact-utils';
 
 interface ContactCardProps {
   contact: Contact;
@@ -61,6 +63,15 @@ export default function ContactCard({
   };
 
   const handleSave = () => {
+    // Validate phone if provided
+    if (editData.phone) {
+      const result = validatePhone(editData.phone);
+      if (!result.valid) {
+        showToast(result.error, 'error');
+        return;
+      }
+      editData.phone = result.normalized;
+    }
     onUpdate(contact.contactId, editData);
     setIsEditing(false);
   };

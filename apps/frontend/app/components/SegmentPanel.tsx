@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react';
 import { useStore, Segment, SegmentFolder } from '../lib/store';
 import { showToast } from './Toast';
+import { useConfirm } from './ConfirmDialog';
 
 interface SegmentPanelProps {
   activeSegmentId: string | null; // null = "All Contacts"
@@ -11,6 +12,7 @@ interface SegmentPanelProps {
 
 export default function SegmentPanel({ activeSegmentId, onSelectSegment }: SegmentPanelProps) {
   const store = useStore();
+  const confirm = useConfirm();
   const { segments, segmentFolders, contacts } = store;
 
   const [search, setSearch] = useState('');
@@ -109,8 +111,9 @@ export default function SegmentPanel({ activeSegmentId, onSelectSegment }: Segme
           <button
             className="sp-action-btn"
             title="Delete"
-            onClick={() => {
-              if (confirm(`Delete "${seg.name}"? Contacts won't be deleted.`)) {
+            onClick={async () => {
+              const ok = await confirm(`Delete "${seg.name}"? Contacts won't be deleted.`, { title: 'Delete Segment', variant: 'danger' });
+              if (ok) {
                 store.deleteSegment(seg.segmentId);
                 if (activeSegmentId === seg.segmentId) onSelectSegment(null);
                 showToast(`Segment "${seg.name}" deleted`);
@@ -203,8 +206,9 @@ export default function SegmentPanel({ activeSegmentId, onSelectSegment }: Segme
                 <span className="sp-folder-name">{folder.name}</span>
                 <div className="sp-item-actions" onClick={(e) => e.stopPropagation()}>
                   <button className="sp-action-btn" title="Add segment" onClick={() => { setCreatingIn(folder.name); }}>+</button>
-                  <button className="sp-action-btn" title="Delete folder" onClick={() => {
-                    if (confirm(`Delete folder "${folder.name}"? Segments inside will become uncategorized.`)) {
+                  <button className="sp-action-btn" title="Delete folder" onClick={async () => {
+                    const ok = await confirm(`Delete folder "${folder.name}"? Segments inside will become uncategorized.`, { title: 'Delete Folder', variant: 'danger' });
+                    if (ok) {
                       store.deleteSegmentFolder(folder.folderId);
                       showToast(`Folder "${folder.name}" deleted`);
                     }
