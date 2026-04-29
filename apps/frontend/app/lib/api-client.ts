@@ -8,10 +8,16 @@ import { config } from './config';
 // Token getter — set by AuthProvider
 let getAuthToken: (() => Promise<string | null>) | null = null;
 let currentWorkspaceId: string | null = null;
+let onAuthExpired: (() => void) | null = null;
 
 /** Called by AuthProvider to wire up token resolution */
 export function setAuthTokenGetter(getter: () => Promise<string | null>) {
   getAuthToken = getter;
+}
+
+/** Called by AuthProvider to wire up sign-out on expired sessions */
+export function setAuthExpiredHandler(handler: () => void) {
+  onAuthExpired = handler;
 }
 
 /** Called by WorkspaceProvider when active workspace changes */
@@ -35,6 +41,8 @@ export interface ApiResponse<T> {
     total?: number;
     page?: number;
     pageSize?: number;
+    nextCursor?: string | null;
+    hasMore?: boolean;
   };
 }
 
@@ -79,8 +87,13 @@ async function apiFetch<T>(
         body: body ? JSON.stringify(body) : undefined,
       });
 
-      // Handle auth failures
+      // Handle auth failures — auto-redirect to login
       if (res.status === 401) {
+        if (onAuthExpired) {
+          onAuthExpired();
+        } else if (typeof window !== 'undefined') {
+          window.location.href = '/login';
+        }
         throw { status: 401, message: 'Session expired. Please sign in again.' } as ApiError;
       }
 

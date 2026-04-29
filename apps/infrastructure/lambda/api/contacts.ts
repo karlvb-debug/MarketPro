@@ -26,51 +26,55 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     // GET /contacts
     if (method === 'GET' && !pathId) {
       const params = event.queryStringParameters || {};
-      const page = Math.max(1, parseInt(params.page || '1', 10));
       const pageSize = Math.min(100, parseInt(params.pageSize || '50', 10));
+      const cursor = params.cursor;  // contactId of the last item from previous page
       const search = params.search?.trim();
-      const status = params.status;
 
-      let query = db
-        .select()
-        .from(contacts)
-        .where(eq(contacts.workspaceId, workspaceId))
-        .limit(pageSize)
-        .offset((page - 1) * pageSize)
-        .orderBy(contacts.createdAt);
+      // Build WHERE conditions
+      const conditions = [eq(contacts.workspaceId, workspaceId)];
 
-      // Add search filter
-      if (search) {
-        query = db
-          .select()
-          .from(contacts)
-          .where(
-            and(
-              eq(contacts.workspaceId, workspaceId),
-              or(
-                ilike(contacts.email, `%${search}%`),
-                ilike(contacts.firstName, `%${search}%`),
-                ilike(contacts.lastName, `%${search}%`),
-                ilike(contacts.company, `%${search}%`),
-              ),
-            ),
-          )
-          .limit(pageSize)
-          .offset((page - 1) * pageSize)
-          .orderBy(contacts.createdAt);
+      // Cursor-based keyset pagination: fetch rows after the cursor
+      if (cursor) {
+        conditions.push(sql`${contacts.contactId} > ${cursor}`);
       }
 
-      const rows = await query;
+      // Search filter
+      if (search) {
+        conditions.push(
+          or(
+            ilike(contacts.email, `%${search}%`),
+            ilike(contacts.firstName, `%${search}%`),
+            ilike(contacts.lastName, `%${search}%`),
+            ilike(contacts.company, `%${search}%`),
+          )!
+        );
+      }
 
-      // Get total count
+      const rows = await db
+        .select()
+        .from(contacts)
+        .where(and(...conditions))
+        .orderBy(contacts.contactId)
+        .limit(pageSize + 1); // Fetch one extra to detect if there's a next page
+
+      const hasMore = rows.length > pageSize;
+      const data = hasMore ? rows.slice(0, pageSize) : rows;
+      const nextCursor = hasMore ? data[data.length - 1]?.contactId : null;
+
+      // Get total count (cached/estimated for large tables)
       const [countResult] = await db
         .select({ count: sql<number>`count(*)::int` })
         .from(contacts)
         .where(eq(contacts.workspaceId, workspaceId));
 
       return respond(200, {
-        data: rows,
-        meta: { total: countResult?.count || 0, page, pageSize },
+        data,
+        meta: {
+          total: countResult?.count || 0,
+          pageSize,
+          nextCursor,
+          hasMore,
+        },
       });
     }
 
@@ -86,12 +90,13 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     // POST /contacts/import — bulk upsert (up to 1,000 per request)
+    // Two-pass strategy to handle both email-based and phone-only contacts
     if (method === 'POST' && event.path?.endsWith('/import')) {
       const body = JSON.parse(event.body || '{}');
-      const rows: unknown[] = Array.isArray(body.contacts) ? body.contacts.slice(0, 1000) : [];
-      if (rows.length === 0) return respond(400, { message: 'No contacts provided' });
+      const rawRows: unknown[] = Array.isArray(body.contacts) ? body.contacts.slice(0, 1000) : [];
+      if (rawRows.length === 0) return respond(400, { message: 'No contacts provided' });
 
-      const values = rows.map((c: any) => ({
+      const toValues = (c: any) => ({
         workspaceId,
         email: c.email || null,
         phone: c.phone || null,
@@ -104,28 +109,59 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         source: c.source || 'csv_import',
         consentSource: c.consent_source || c.consentSource || null,
         customFields: c.custom_fields || c.customFields || {},
-      }));
+      });
 
-      // Single INSERT ... ON CONFLICT DO UPDATE for all contacts
-      const result = await db
-        .insert(contacts)
-        .values(values)
-        .onConflictDoUpdate({
-          target: [contacts.workspaceId, contacts.email],
-          set: {
-            firstName: sql`COALESCE(EXCLUDED.first_name, contacts.first_name)`,
-            lastName: sql`COALESCE(EXCLUDED.last_name, contacts.last_name)`,
-            phone: sql`COALESCE(EXCLUDED.phone, contacts.phone)`,
-            company: sql`COALESCE(EXCLUDED.company, contacts.company)`,
-            timezone: sql`COALESCE(EXCLUDED.timezone, contacts.timezone)`,
-            state: sql`COALESCE(EXCLUDED.state, contacts.state)`,
-            consentSource: sql`COALESCE(EXCLUDED.consent_source, contacts.consent_source)`,
-            updatedAt: new Date(),
-          },
-        })
-        .returning({ contactId: contacts.contactId });
+      // Split into: contacts with email vs phone-only vs invalid
+      const withEmail = rawRows.filter((c: any) => c.email?.trim());
+      const phoneOnly = rawRows.filter((c: any) => !c.email?.trim() && c.phone?.trim());
+      const rejected = rawRows.length - withEmail.length - phoneOnly.length;
 
-      return respond(200, { imported: result.length });
+      let imported = 0;
+
+      // Pass 1: Upsert contacts WITH email (deduplicate on workspace + email)
+      if (withEmail.length > 0) {
+        const result = await db
+          .insert(contacts)
+          .values(withEmail.map(toValues))
+          .onConflictDoUpdate({
+            target: [contacts.workspaceId, contacts.email],
+            set: {
+              firstName: sql`COALESCE(EXCLUDED.first_name, contacts.first_name)`,
+              lastName: sql`COALESCE(EXCLUDED.last_name, contacts.last_name)`,
+              phone: sql`COALESCE(EXCLUDED.phone, contacts.phone)`,
+              company: sql`COALESCE(EXCLUDED.company, contacts.company)`,
+              timezone: sql`COALESCE(EXCLUDED.timezone, contacts.timezone)`,
+              state: sql`COALESCE(EXCLUDED.state, contacts.state)`,
+              consentSource: sql`COALESCE(EXCLUDED.consent_source, contacts.consent_source)`,
+              updatedAt: new Date(),
+            },
+          })
+          .returning({ contactId: contacts.contactId });
+        imported += result.length;
+      }
+
+      // Pass 2: Upsert phone-only contacts (deduplicate on workspace + phone)
+      if (phoneOnly.length > 0) {
+        const result = await db
+          .insert(contacts)
+          .values(phoneOnly.map(toValues))
+          .onConflictDoUpdate({
+            target: [contacts.workspaceId, contacts.phone],
+            set: {
+              firstName: sql`COALESCE(EXCLUDED.first_name, contacts.first_name)`,
+              lastName: sql`COALESCE(EXCLUDED.last_name, contacts.last_name)`,
+              company: sql`COALESCE(EXCLUDED.company, contacts.company)`,
+              timezone: sql`COALESCE(EXCLUDED.timezone, contacts.timezone)`,
+              state: sql`COALESCE(EXCLUDED.state, contacts.state)`,
+              consentSource: sql`COALESCE(EXCLUDED.consent_source, contacts.consent_source)`,
+              updatedAt: new Date(),
+            },
+          })
+          .returning({ contactId: contacts.contactId });
+        imported += result.length;
+      }
+
+      return respond(200, { imported, rejected });
     }
 
     // POST /contacts — single upsert

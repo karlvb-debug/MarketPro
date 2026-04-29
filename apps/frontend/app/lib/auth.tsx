@@ -14,7 +14,7 @@ import {
   CognitoUserAttribute,
 } from 'amazon-cognito-identity-js';
 import { config } from './config';
-import { setAuthTokenGetter } from './api-client';
+import { setAuthTokenGetter, setAuthExpiredHandler } from './api-client';
 
 // ============================================
 // Types
@@ -97,7 +97,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Wire up token getter for api-client
   useEffect(() => {
     setAuthTokenGetter(getToken);
-  }, [getToken]);
+    setAuthExpiredHandler(() => {
+      // Clear local state and redirect to login
+      if (pool) {
+        const cognitoUser = pool.getCurrentUser();
+        if (cognitoUser) cognitoUser.signOut();
+      }
+      setUser(null);
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+      }
+    });
+  }, [getToken, pool]);
 
   // Check for existing session on mount
   useEffect(() => {

@@ -51,26 +51,38 @@ export class ApiStack extends cdk.Stack {
     };
 
     // ============================================
-    // Authorizer Lambda — JWT verification only (no DB needed)
+    // Authorizer Lambda — JWT verification + RBAC (workspace role check)
     // ============================================
     const authorizerLambda = new lambdaNodejs.NodejsFunction(this, 'WorkspaceAuthorizerFunction', {
       runtime: lambda.Runtime.NODEJS_20_X,
       entry: path.join(__dirname, '../lambda/authorizer.ts'),
       handler: 'handler',
-      memorySize: 128,
-      timeout: cdk.Duration.seconds(5),
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(10),
+      vpc: props.vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      securityGroups: [props.lambdaSecurityGroup],
       environment: {
         USER_POOL_ID: props.userPool.userPoolId,
         APP_CLIENT_ID: props.userPoolClient.userPoolClientId,
+        DATABASE_SECRET_ARN: props.dbSecret.secretArn,
+        DATABASE_HOST: props.database.instanceEndpoint.hostname,
+        DATABASE_NAME: 'marketingsaas',
+        DATABASE_URL: `postgresql://placeholder@${props.database.instanceEndpoint.hostname}:5432/marketingsaas`,
       },
       bundling: {
         externalModules: ['@aws-sdk/*'],
       },
     });
+    props.dbSecret.grantRead(authorizerLambda);
 
-    const tokenAuthorizer = new apigateway.TokenAuthorizer(this, 'WorkspaceTokenAuthorizer', {
+    // Use RequestAuthorizer so we can read X-Workspace-Id for per-workspace caching
+    const tokenAuthorizer = new apigateway.RequestAuthorizer(this, 'WorkspaceTokenAuthorizer', {
       handler: authorizerLambda,
-      identitySource: apigateway.IdentitySource.header('Authorization'),
+      identitySources: [
+        apigateway.IdentitySource.header('Authorization'),
+        apigateway.IdentitySource.header('X-Workspace-Id'),
+      ],
       resultsCacheTtl: cdk.Duration.seconds(300),
     });
 

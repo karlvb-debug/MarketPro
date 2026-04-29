@@ -1,44 +1,118 @@
-import { APIGatewayTokenAuthorizerEvent, APIGatewayAuthorizerResult } from 'aws-lambda';
+import { APIGatewayRequestAuthorizerEvent, APIGatewayAuthorizerResult } from 'aws-lambda';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
+import { Pool } from 'pg';
+
+// ============================================
+// Workspace Authorizer — JWT verification + RBAC enforcement
+// Validates that the authenticated user has a role in the requested workspace.
+// Prevents IDOR / cross-tenant data breaches.
+// ============================================
 
 // 1. Initialize Cognito Verifier
-// These environment variables will be injected by the AWS CDK api-stack.ts
 const verifier = CognitoJwtVerifier.create({
   userPoolId: process.env.USER_POOL_ID || 'us-east-1_xxxxxxxxx',
   tokenUse: 'id',
   clientId: process.env.APP_CLIENT_ID || 'xxxxxxxxxxxxxx',
 });
 
-export const handler = async (event: APIGatewayTokenAuthorizerEvent): Promise<APIGatewayAuthorizerResult> => {
+// 2. Reusable PG connection pool (warm-start friendly)
+let pool: Pool | null = null;
+
+async function getPool(): Promise<Pool> {
+  if (pool) return pool;
+
+  const secretArn = process.env.DATABASE_SECRET_ARN;
+  const dbHost = process.env.DATABASE_HOST;
+  const dbName = process.env.DATABASE_NAME || 'marketingsaas';
+
+  let connectionString: string;
+
+  if (secretArn) {
+    const { SecretsManagerClient, GetSecretValueCommand } = await import('@aws-sdk/client-secrets-manager');
+    const smClient = new SecretsManagerClient({});
+    const secret = await smClient.send(new GetSecretValueCommand({ SecretId: secretArn }));
+    const creds = JSON.parse(secret.SecretString || '{}');
+    connectionString = `postgresql://${creds.username}:${encodeURIComponent(creds.password)}@${dbHost || creds.host}:${creds.port || 5432}/${dbName}`;
+  } else {
+    connectionString = process.env.DATABASE_URL || '';
+  }
+
+  pool = new Pool({
+    connectionString,
+    max: 1,
+    idleTimeoutMillis: 60000,
+    connectionTimeoutMillis: 5000,
+    ssl: connectionString.includes('localhost') ? undefined : { rejectUnauthorized: false },
+  });
+
+  return pool;
+}
+
+/**
+ * Query users_workspaces to resolve the caller's role in the requested workspace.
+ * Returns the role string or null if the user has no access.
+ */
+async function resolveWorkspaceRole(userId: string, workspaceId: string): Promise<string | null> {
+  const client = await getPool();
+  const result = await client.query(
+    'SELECT role FROM users_workspaces WHERE user_id = $1 AND workspace_id = $2 LIMIT 1',
+    [userId, workspaceId]
+  );
+  return result.rows.length > 0 ? result.rows[0].role : null;
+}
+
+export const handler = async (event: APIGatewayRequestAuthorizerEvent): Promise<APIGatewayAuthorizerResult> => {
   console.log('Authorizer invoked.');
-  
+
   try {
-    const authHeader = event.authorizationToken;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new Error('Unauthorized'); 
+    // 3. Extract and verify the JWT
+    const authHeader = event.headers?.['Authorization'] || event.headers?.['authorization'] || '';
+    if (!authHeader.startsWith('Bearer ')) {
+      throw new Error('Unauthorized');
     }
 
     const token = authHeader.split(' ')[1];
-    
-    // 2. Verify the Cognito JWT — this is cryptographic verification, no DB needed
     const payload = await verifier.verify(token!);
     const userId = payload.sub;
 
-    console.log(`User ${userId} authenticated successfully.`);
+    // 4. Extract the workspace ID from the request header
+    const workspaceId = event.headers?.['X-Workspace-Id'] || event.headers?.['x-workspace-id'];
 
-    // 3. Allow all methods on this API for the authenticated user
-    //    Use a wildcard ARN so the cached policy covers all routes
+    // Build the wildcard ARN for the cached policy
     const arnParts = event.methodArn.split(':');
     const apiGatewayArnParts = arnParts[5]!.split('/');
     const wildcardArn = arnParts.slice(0, 5).join(':') + ':' + apiGatewayArnParts[0] + '/' + apiGatewayArnParts[1] + '/*';
 
+    // 5. If no workspace header, allow through (some endpoints like /workspaces don't need it)
+    //    The individual Lambda will validate workspace access as needed.
+    if (!workspaceId) {
+      console.log(`User ${userId} authenticated (no workspace context).`);
+      return generatePolicy(userId!, 'Allow', wildcardArn, {
+        tenant_role: 'none',
+        workspace_id: '',
+      });
+    }
+
+    // 6. RBAC: Verify the user has a role in the requested workspace
+    const role = await resolveWorkspaceRole(userId!, workspaceId);
+
+    if (!role) {
+      console.warn(`RBAC DENIED: User ${userId} has no access to workspace ${workspaceId}`);
+      return generatePolicy(userId!, 'Deny', wildcardArn, {
+        tenant_role: 'denied',
+        workspace_id: workspaceId,
+      });
+    }
+
+    console.log(`User ${userId} authorized as '${role}' in workspace ${workspaceId}.`);
+
     return generatePolicy(userId!, 'Allow', wildcardArn, {
-      'tenant_role': 'admin',
+      tenant_role: role,
+      workspace_id: workspaceId,
     });
 
   } catch (error) {
     console.error('Authorization failed:', error);
-    // API Gateway requires literally throwing 'Unauthorized' to map to a 401 response
     throw new Error('Unauthorized');
   }
 };
@@ -57,7 +131,7 @@ const generatePolicy = (
         {
           Action: 'execute-api:Invoke',
           Effect: effect,
-          Resource: resource, 
+          Resource: resource,
         },
       ],
     },
