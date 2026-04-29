@@ -111,9 +111,11 @@ async function apiFetch<T>(
         } as ApiError;
       }
 
-      // Handle server errors (5xx) — retry with backoff
+      // Handle server errors (5xx) — retry with backoff for idempotent methods only
+      // NEVER auto-retry POST — it can cause duplicate campaign sends, double charges, etc.
       if (res.status >= 500) {
-        if (attempt < retries) {
+        const isIdempotent = ['GET', 'PUT', 'DELETE'].includes(method);
+        if (isIdempotent && attempt < retries) {
           await delay(Math.pow(2, attempt) * 500);
           continue;
         }

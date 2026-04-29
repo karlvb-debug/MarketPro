@@ -278,7 +278,7 @@ export const smsInbox = pgTable('sms_inbox', {
     .notNull()
     .references(() => workspaces.workspaceId, { onDelete: 'cascade' }),
   contactId: uuid('contact_id')
-    .references(() => contacts.contactId),                  // Null if sender is unknown
+    .references(() => contacts.contactId, { onDelete: 'set null' }), // SET NULL: GDPR deletion anonymizes but preserves inbox history
   fromNumber: varchar('from_number', { length: 20 }).notNull(),
   toNumber: varchar('to_number', { length: 20 }).notNull(), // The workspace's number
   body: text('body'),
@@ -450,7 +450,7 @@ export const emailInbox = pgTable('email_inbox', {
     .notNull()
     .references(() => workspaces.workspaceId, { onDelete: 'cascade' }),
   contactId: uuid('contact_id')
-    .references(() => contacts.contactId),
+    .references(() => contacts.contactId, { onDelete: 'set null' }), // SET NULL: preserves inbox history after GDPR deletion
   fromAddress: varchar('from_address', { length: 320 }).notNull(),
   subject: varchar('subject', { length: 998 }),
   body: text('body'),
@@ -475,7 +475,7 @@ export const formSubmissions = pgTable('form_submissions', {
     .notNull()
     .references(() => webForms.formId, { onDelete: 'cascade' }),
   contactId: uuid('contact_id')
-    .references(() => contacts.contactId),
+    .references(() => contacts.contactId, { onDelete: 'set null' }), // SET NULL: preserves form submission data after GDPR deletion
   formData: jsonb('form_data').notNull(),                   // { fieldName: value } pairs
   ipAddress: varchar('ip_address', { length: 45 }),
   submittedAt: timestamp('submitted_at', { withTimezone: true }).defaultNow(),

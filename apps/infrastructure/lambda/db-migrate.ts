@@ -204,7 +204,7 @@ CREATE INDEX IF NOT EXISTS campaign_messages_workspace_idx ON campaign_messages 
 CREATE TABLE IF NOT EXISTS sms_inbox (
     message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
-    contact_id UUID REFERENCES contacts(contact_id),
+    contact_id UUID REFERENCES contacts(contact_id) ON DELETE SET NULL,
     from_number VARCHAR(20) NOT NULL,
     to_number VARCHAR(20) NOT NULL,
     body TEXT,
@@ -311,7 +311,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS custom_field_defs_unique_key ON custom_field_d
 CREATE TABLE IF NOT EXISTS email_inbox (
     message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
-    contact_id UUID REFERENCES contacts(contact_id),
+    contact_id UUID REFERENCES contacts(contact_id) ON DELETE SET NULL,
     from_address VARCHAR(320) NOT NULL,
     subject VARCHAR(998),
     body TEXT,
@@ -325,7 +325,7 @@ CREATE TABLE IF NOT EXISTS form_submissions (
     submission_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
     form_id UUID NOT NULL REFERENCES web_forms(form_id) ON DELETE CASCADE,
-    contact_id UUID REFERENCES contacts(contact_id),
+    contact_id UUID REFERENCES contacts(contact_id) ON DELETE SET NULL,
     form_data JSONB NOT NULL,
     ip_address VARCHAR(45),
     submitted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -359,6 +359,34 @@ $$ LANGUAGE plpgsql;
 -- ============================================
 
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS state VARCHAR(2);
+
+-- Enable pg_trgm for fast ILIKE %search% queries (prevents full table scans)
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- GIN trigram indexes on searchable contacts columns
+CREATE INDEX IF NOT EXISTS contacts_email_trgm_idx ON contacts USING GIN (email gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS contacts_first_name_trgm_idx ON contacts USING GIN (first_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS contacts_last_name_trgm_idx ON contacts USING GIN (last_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS contacts_company_trgm_idx ON contacts USING GIN (company gin_trgm_ops);
+
+-- Admin Audit Log (Super Admin impersonation trail)
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+    log_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    admin_user_id VARCHAR(255) NOT NULL,
+    impersonated_workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+    action VARCHAR(50) NOT NULL,
+    resource VARCHAR(255) NOT NULL,
+    resource_id VARCHAR(255),
+    method VARCHAR(10) NOT NULL,
+    path VARCHAR(500),
+    ip_address VARCHAR(45),
+    user_agent TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS admin_audit_admin_idx ON admin_audit_log (admin_user_id);
+CREATE INDEX IF NOT EXISTS admin_audit_workspace_idx ON admin_audit_log (impersonated_workspace_id);
+CREATE INDEX IF NOT EXISTS admin_audit_created_at_idx ON admin_audit_log (created_at);
 `;
 
 
