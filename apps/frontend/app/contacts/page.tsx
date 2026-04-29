@@ -17,7 +17,7 @@ import { validatePhone } from '../lib/contact-utils';
 export default function ContactsPage() {
   const {
     contacts, segments, settings, addContact, updateContact, updateCompliance, deleteContact,
-    importContacts, addContactsToSegment, removeContactsFromSegment, hydrated,
+    importContacts, bulkDeleteContacts, addContactsToSegment, removeContactsFromSegment, hydrated,
   } = useStore();
   const confirm = useConfirm();
 
@@ -213,7 +213,7 @@ export default function ContactsPage() {
                   ⧩ Filter{filters.length > 0 ? ` (${filters.length})` : ''}
                 </button>
                 <button className="btn btn-secondary btn-sm" onClick={() => setShowImportModal(true)}>
-                  Import CSV
+                  Import CSV / Excel
                 </button>
                 <button className="btn btn-primary btn-sm" onClick={() => setShowAddModal(true)}>
                   + Add Contact
@@ -233,17 +233,17 @@ export default function ContactsPage() {
                 )}
                 <button className="btn btn-danger btn-xs" onClick={async () => {
                   const ok = await confirm(
-                    `Delete ${selectedIds.size} contacts? This cannot be undone.`,
-                    { title: 'Delete Contacts', variant: 'danger', confirmLabel: 'Delete All' }
+                    `Permanently delete ${selectedIds.size} contact${selectedIds.size !== 1 ? 's' : ''}? This cannot be undone.`,
+                    { title: 'Delete Contacts', variant: 'danger', confirmLabel: `Delete ${selectedIds.size}` }
                   );
                   if (ok) {
                     const ids = Array.from(selectedIds);
-                    ids.forEach((id) => deleteContact(id));
-                    showToast(`${ids.length} contacts deleted`);
+                    bulkDeleteContacts(ids);
+                    showToast(`${ids.length} contact${ids.length !== 1 ? 's' : ''} deleted`);
                     setSelectedIds(new Set());
                   }
                 }}>
-                  Delete
+                  🗑 Delete {selectedIds.size}
                 </button>
               </>
             ) : undefined}
@@ -300,12 +300,36 @@ export default function ContactsPage() {
 
           {displayContacts.length === 0 ? (
             <EmptyState
+              icon={search ? '🔍' : '👥'}
               title={search ? 'No matches found' : 'No contacts yet'}
-              description={search ? 'Try a different search term' : 'Add your first contact or import a CSV file to get started.'}
-              action={!search ? { label: '+ Add Contact', onClick: () => setShowAddModal(true) } : undefined}
-            />
+              description={search ? 'Try a different search term or clear your filters.' : 'Add your first contact or import a CSV or Excel file to get started.'}
+            >
+              {!search && (
+                <button className="btn btn-primary btn-sm" onClick={() => setShowAddModal(true)}>
+                  + Add Contact
+                </button>
+              )}
+            </EmptyState>
           ) : (
             <DataTable headers={['', 'Name', 'Email', 'Phone', 'Company', 'Segments']}>
+              <tr>
+                <th style={{ width: '40px', padding: '0 var(--space-3)' }}>
+                  <input
+                    type="checkbox"
+                    title="Select all"
+                    checked={displayContacts.length > 0 && displayContacts.every((c) => selectedIds.has(c.contactId))}
+                    ref={(el) => {
+                      if (el) el.indeterminate = selectedIds.size > 0 && !displayContacts.every((c) => selectedIds.has(c.contactId));
+                    }}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
+                <th>Name</th>
+                <th className="hide-mobile">Email</th>
+                <th className="hide-mobile">Phone</th>
+                <th className="hide-mobile">Company</th>
+                <th className="hide-mobile">Segments</th>
+              </tr>
               {displayContacts.map((c) => (
                 <tr key={c.contactId}>
                   <td style={{ width: '40px' }}>

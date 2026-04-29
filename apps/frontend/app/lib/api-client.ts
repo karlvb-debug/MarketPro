@@ -143,7 +143,7 @@ export const apiClient = {
   post: <T>(path: string, body?: unknown) => apiFetch<T>('POST', path, body),
   put: <T>(path: string, body?: unknown) => apiFetch<T>('PUT', path, body),
   patch: <T>(path: string, body?: unknown) => apiFetch<T>('PATCH', path, body),
-  delete: <T = void>(path: string) => apiFetch<T>('DELETE', path),
+  delete: <T = void>(path: string, body?: unknown) => apiFetch<T>('DELETE', path, body),
 };
 
 // ============================================
@@ -173,6 +173,7 @@ export const api = {
     create: (data: unknown) => apiClient.post<unknown>('/contacts', data),
     update: (id: string, data: unknown) => apiClient.put<unknown>(`/contacts/${id}`, data),
     delete: (id: string) => apiClient.delete(`/contacts/${id}`),
+    bulkDelete: (ids: string[]) => apiClient.delete<{ deleted: number }>('/contacts', { ids }),
     import: (contacts: unknown[]) => apiClient.post<{ added: number; updated: number; skipped: number }>('/contacts/import', { contacts }),
   },
 

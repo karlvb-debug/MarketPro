@@ -35,12 +35,13 @@ export function validatePhone(raw: string): { valid: true; normalized: string } 
 }
 
 export const SYSTEM_FIELDS = [
-  { key: 'firstName' as const, label: 'First Name', required: false },
-  { key: 'lastName' as const, label: 'Last Name', required: false },
-  { key: 'email' as const, label: 'Email Address', required: false },
-  { key: 'phone' as const, label: 'Phone Number', required: false },
-  { key: 'company' as const, label: 'Company', required: false },
-  { key: 'timezone' as const, label: 'Timezone', required: false },
+  { key: 'firstName' as const, label: 'First Name', required: false, icon: '👤' },
+  { key: 'lastName' as const, label: 'Last Name', required: false, icon: '👤' },
+  { key: 'email' as const, label: 'Email Address', required: false, icon: '@' },
+  { key: 'phone' as const, label: 'Phone Number', required: false, icon: '#' },
+  { key: 'company' as const, label: 'Company', required: false, icon: '□' },
+  { key: 'state' as const, label: 'State / Province', required: false, icon: '📍' },
+  { key: 'timezone' as const, label: 'Timezone', required: false, icon: '🕐' },
 ];
 
 export type SystemFieldKey = typeof SYSTEM_FIELDS[number]['key'];
@@ -59,8 +60,36 @@ export interface ProcessedContact {
   email: string;
   phone: string;
   company: string;
+  state: string;
   timezone: string;
   issues: ImportIssue[];
+  skippedReason?: string;
+}
+
+// ---- XLSX Parsing ----
+// Reads the first sheet of an .xlsx file and returns the same shape as parseCsv.
+// Uses SheetJS (xlsx) — imported dynamically so it doesn't bloat the main bundle.
+
+export async function parseXlsx(buffer: ArrayBuffer): Promise<{ headers: string[]; rows: string[][] }> {
+  const XLSX = await import('xlsx');
+  const workbook = XLSX.read(buffer, { type: 'array' });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return { headers: [], rows: [] };
+  const sheet = workbook.Sheets[sheetName];
+  if (!sheet) return { headers: [], rows: [] };
+
+  // sheet_to_json with header:1 returns a 2D array (first row = headers)
+  const raw = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: '' });
+  if (raw.length === 0) return { headers: [], rows: [] };
+
+  const headers = (raw[0] ?? []).map((h) => String(h ?? '').trim());
+  const rows = raw.slice(1).map((row) =>
+    headers.map((_, i) => String(row[i] ?? '').trim())
+  );
+
+  // Filter out entirely empty rows
+  const nonBlankRows = rows.filter((row) => row.some((cell) => cell !== ''));
+  return { headers, rows: nonBlankRows };
 }
 
 export function parseCsv(text: string): { headers: string[]; rows: string[][] } {
@@ -99,6 +128,7 @@ const FIELD_PATTERNS: Record<SystemFieldKey, RegExp[]> = {
   email: [/e.?mail/i, /^email$/i, /email.?addr/i],
   phone: [/phone/i, /mobile/i, /cell/i, /tel/i, /number/i],
   company: [/company/i, /org/i, /business/i, /employer/i],
+  state: [/^state$/i, /province/i, /^st$/i, /region/i],
   timezone: [/timezone/i, /time.?zone/i, /tz/i],
 };
 
@@ -147,7 +177,7 @@ export function processImportRow(
   mapping: Record<string, SystemFieldKey | ''>,
 ): ProcessedContact | null {
   const issues: ImportIssue[] = [];
-  const result: Record<string, string> = { firstName: '', lastName: '', email: '', phone: '', company: '', timezone: '' };
+  const result: Record<string, string> = { firstName: '', lastName: '', email: '', phone: '', company: '', state: '', timezone: '' };
 
   const headers = Object.keys(mapping);
   for (let i = 0; i < headers.length; i++) {
@@ -170,16 +200,26 @@ export function processImportRow(
   }
   if (result.email) {
     result.email = result.email.toLowerCase();
-    if (!validateEmail(result.email)) issues.push({ field: 'email', type: 'error', message: `Invalid email format: "${result.email}"` });
+    if (!validateEmail(result.email)) {
+      issues.push({ field: 'email', type: 'error', message: `Invalid email format: "${result.email}" — cleared` });
+      result.email = ''; // don't store a bad email
+    }
   }
   if (result.phone) {
     const original = result.phone;
     const { normalized, valid } = normalizePhone(result.phone);
-    result.phone = normalized;
-    if (!valid && result.phone) issues.push({ field: 'phone', type: 'warning', message: `Phone may be invalid: "${original}"`, original, corrected: normalized });
-    else if (normalized !== original) issues.push({ field: 'phone', type: 'fixed', message: 'Phone normalized to E.164', original, corrected: normalized });
+    if (!valid) {
+      issues.push({ field: 'phone', type: 'warning', message: `Phone could not be normalized: "${original}" — cleared`, original });
+      result.phone = ''; // don't store a bad phone number
+    } else {
+      result.phone = normalized;
+      if (normalized !== original) issues.push({ field: 'phone', type: 'fixed', message: 'Phone normalized to E.164', original, corrected: normalized });
+    }
   }
-  if (!result.email && !result.phone) issues.push({ field: 'email', type: 'warning', message: 'No email or phone — contact may be unreachable' });
+  if (!result.email && !result.phone) issues.push({ field: 'email', type: 'warning', message: 'No valid email or phone — contact may be unreachable' });
 
-  return { firstName: result.firstName || '', lastName: result.lastName || '', email: result.email || '', phone: result.phone || '', company: result.company || '', timezone: result.timezone || '', issues };
+  // Skip entirely if no identifier AND no name (nothing useful to store)
+  if (!result.email && !result.phone && !result.firstName && !result.lastName) return null;
+
+  return { firstName: result.firstName || '', lastName: result.lastName || '', email: result.email || '', phone: result.phone || '', company: result.company || '', state: result.state || '', timezone: result.timezone || '', issues };
 }

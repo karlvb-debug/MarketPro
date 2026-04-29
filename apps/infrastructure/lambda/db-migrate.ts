@@ -352,7 +352,15 @@ EXCEPTION WHEN OTHERS THEN
     RETURN FALSE;
 END;
 $$ LANGUAGE plpgsql;
+
+-- ============================================
+-- ADDITIVE MIGRATIONS — safe to re-run (IF NOT EXISTS)
+-- Add new columns here instead of modifying CREATE TABLE above
+-- ============================================
+
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS state VARCHAR(2);
 `;
+
 
 export const handler = async () => {
   console.log('Starting database migration...');

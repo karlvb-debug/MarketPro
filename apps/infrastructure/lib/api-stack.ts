@@ -204,6 +204,11 @@ export class ApiStack extends cdk.Stack {
     const contactsIntegration = new apigateway.LambdaIntegration(contactsLambda);
     contactsResource.addMethod('GET', contactsIntegration, securedMethodOptions);
     contactsResource.addMethod('POST', contactsIntegration, securedMethodOptions);
+    contactsResource.addMethod('DELETE', contactsIntegration, securedMethodOptions); // bulk delete
+
+    // /contacts/import — bulk upsert endpoint
+    const contactsImportResource = contactsResource.addResource('import');
+    contactsImportResource.addMethod('POST', contactsIntegration, securedMethodOptions);
 
     const contactIdResource = contactsResource.addResource('{id}');
     contactIdResource.addMethod('GET', contactsIntegration, securedMethodOptions);

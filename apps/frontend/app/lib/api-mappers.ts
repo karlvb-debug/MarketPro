@@ -313,6 +313,7 @@ export function contactToApi(c: Omit<Contact, 'contactId' | 'createdAt' | 'compl
     last_name: c.lastName || null,
     company: c.company || null,
     timezone: c.timezone || null,
+    state: c.state || null,
     source: c.source || 'manual',
     consent_source: c.consentSource || null,
     custom_fields: c.customFields || {},

@@ -6,6 +6,7 @@ import { FormSelect } from './FormElements';
 import { showToast } from './Toast';
 import {
   parseCsv,
+  parseXlsx,
   guessColumnMapping,
   processImportRow,
   SYSTEM_FIELDS,
@@ -58,7 +59,7 @@ export default function ImportWizard({
 
   // CSV data
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
-  const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
+  const [csvRows, setCsvRows] = useState<string[][]>([]);
 
   // Column mapping: csvHeader → systemFieldKey (or '')
   const [mapping, setMapping] = useState<Record<string, SystemFieldKey | ''>>({});
@@ -93,31 +94,54 @@ export default function ImportWizard({
 
   // ---- Step 1: Upload ----
   const handleFile = (file: File) => {
-    if (!file.name.endsWith('.csv')) {
-      showToast('Please upload a CSV file', 'error');
+    const isXlsx = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
+    const isCsv = file.name.endsWith('.csv');
+
+    if (!isXlsx && !isCsv) {
+      showToast('Please upload a CSV or Excel (.xlsx) file', 'error');
       return;
     }
     setFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const text = evt.target?.result as string;
-      const { headers, rows } = parseCsv(text);
 
-      if (headers.length === 0 || rows.length === 0) {
-        showToast('CSV file is empty or has no data rows.', 'error');
-        return;
-      }
-
-      setCsvHeaders(headers);
-      setCsvRows(rows);
-
-      // Auto-map columns
-      const autoMapping = guessColumnMapping(headers);
-      setMapping(autoMapping as Record<string, SystemFieldKey | ''>);
-
-      setStep('map');
-    };
-    reader.readAsText(file);
+    if (isXlsx) {
+      // XLSX path — read as ArrayBuffer
+      const reader = new FileReader();
+      reader.onload = async (evt) => {
+        const buffer = evt.target?.result as ArrayBuffer;
+        try {
+          const { headers, rows } = await parseXlsx(buffer);
+          if (headers.length === 0 || rows.length === 0) {
+            showToast('Spreadsheet is empty or has no data rows.', 'error');
+            return;
+          }
+          setCsvHeaders(headers);
+          setCsvRows(rows);
+          const autoMapping = guessColumnMapping(headers);
+          setMapping(autoMapping as Record<string, SystemFieldKey | ''>);
+          setStep('map');
+        } catch {
+          showToast('Failed to read Excel file. Please try saving as .xlsx and re-uploading.', 'error');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      // CSV path — read as text
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const text = evt.target?.result as string;
+        const { headers, rows } = parseCsv(text);
+        if (headers.length === 0 || rows.length === 0) {
+          showToast('CSV file is empty or has no data rows.', 'error');
+          return;
+        }
+        setCsvHeaders(headers);
+        setCsvRows(rows);
+        const autoMapping = guessColumnMapping(headers);
+        setMapping(autoMapping as Record<string, SystemFieldKey | ''>);
+        setStep('map');
+      };
+      reader.readAsText(file);
+    }
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -215,6 +239,7 @@ export default function ImportWizard({
       email: c.email,
       phone: c.phone,
       company: c.company,
+      state: c.state,
       timezone: c.timezone,
       segments: activeSegmentName ? [activeSegmentName] : ([] as string[]),
       source: 'csv_import',
@@ -353,7 +378,7 @@ export default function ImportWizard({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".csv"
+                accept=".csv,.xlsx,.xls"
                 style={{ display: 'none' }}
                 onChange={handleFileInput}
               />
@@ -362,15 +387,16 @@ export default function ImportWizard({
                   className="font-medium text-primary"
                   style={{ fontSize: 'var(--text-sm)', marginBottom: 'var(--space-2)' }}
                 >
-                  Any CSV format is supported
+                  CSV and Excel files supported
                 </p>
                 <p
                   className="text-secondary"
                   style={{ fontSize: 'var(--text-xs)', lineHeight: 1.8 }}
                 >
-                  You&apos;ll map your CSV columns to contact fields in the next step. We&apos;ll
-                  auto-detect common headers like &quot;First Name&quot;, &quot;Email&quot;,
-                  &quot;Phone&quot;, etc.
+                  Upload a <strong>.csv</strong> or <strong>.xlsx</strong> file. You&apos;ll map
+                  your columns to contact fields in the next step. We&apos;ll auto-detect common
+                  headers like &quot;First Name&quot;, &quot;Email&quot;, &quot;Phone&quot;, etc.
+                  Multi-sheet workbooks will import from the first sheet.
                 </p>
               </div>
             </>
@@ -534,6 +560,7 @@ export default function ImportWizard({
                       <th>Email</th>
                       <th>Phone</th>
                       <th>Company</th>
+                      <th style={{ width: 60 }}>State</th>
                       <th style={{ width: 40 }}></th>
                     </tr>
                   </thead>
@@ -567,6 +594,7 @@ export default function ImportWizard({
                           <td>{renderCell(c.email, c.issues, 'email')}</td>
                           <td className="font-mono">{renderCell(c.phone, c.issues, 'phone')}</td>
                           <td>{c.company || <span className="text-tertiary">—</span>}</td>
+                          <td className="font-mono" style={{ fontSize: 'var(--text-xs)' }}>{c.state || <span className="text-tertiary">—</span>}</td>
                           <td>
                             {isSkipped ? (
                               <span

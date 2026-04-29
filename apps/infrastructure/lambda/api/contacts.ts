@@ -7,7 +7,7 @@
 // ============================================
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { eq, and, or, ilike, sql } from 'drizzle-orm';
+import { eq, and, or, ilike, sql, inArray } from 'drizzle-orm';
 import { getDb, respond, getWorkspaceId, getUserId } from '../lib/db';
 import { contacts } from '../../drizzle/schema';
 
@@ -85,10 +85,54 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return respond(200, row);
     }
 
-    // POST /contacts
+    // POST /contacts/import — bulk upsert (up to 1,000 per request)
+    if (method === 'POST' && event.path?.endsWith('/import')) {
+      const body = JSON.parse(event.body || '{}');
+      const rows: unknown[] = Array.isArray(body.contacts) ? body.contacts.slice(0, 1000) : [];
+      if (rows.length === 0) return respond(400, { message: 'No contacts provided' });
+
+      const values = rows.map((c: any) => ({
+        workspaceId,
+        email: c.email || null,
+        phone: c.phone || null,
+        firstName: c.first_name || c.firstName || null,
+        lastName: c.last_name || c.lastName || null,
+        company: c.company || null,
+        timezone: c.timezone || null,
+        state: c.state || null,
+        status: 'active' as const,
+        source: c.source || 'csv_import',
+        consentSource: c.consent_source || c.consentSource || null,
+        customFields: c.custom_fields || c.customFields || {},
+      }));
+
+      // Single INSERT ... ON CONFLICT DO UPDATE for all contacts
+      const result = await db
+        .insert(contacts)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [contacts.workspaceId, contacts.email],
+          set: {
+            firstName: sql`COALESCE(EXCLUDED.first_name, contacts.first_name)`,
+            lastName: sql`COALESCE(EXCLUDED.last_name, contacts.last_name)`,
+            phone: sql`COALESCE(EXCLUDED.phone, contacts.phone)`,
+            company: sql`COALESCE(EXCLUDED.company, contacts.company)`,
+            timezone: sql`COALESCE(EXCLUDED.timezone, contacts.timezone)`,
+            state: sql`COALESCE(EXCLUDED.state, contacts.state)`,
+            consentSource: sql`COALESCE(EXCLUDED.consent_source, contacts.consent_source)`,
+            updatedAt: new Date(),
+          },
+        })
+        .returning({ contactId: contacts.contactId });
+
+      return respond(200, { imported: result.length });
+    }
+
+    // POST /contacts — single upsert
     if (method === 'POST') {
       const body = JSON.parse(event.body || '{}');
-      const [row] = await db.insert(contacts).values({
+
+      const values = {
         workspaceId,
         email: body.email || null,
         phone: body.phone || null,
@@ -96,12 +140,33 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         lastName: body.last_name || body.lastName || null,
         company: body.company || null,
         timezone: body.timezone || null,
-        status: body.status || 'active',
+        state: body.state || null,
+        status: (body.status || 'active') as 'active' | 'unsubscribed' | 'bounced' | 'complained',
         source: body.source || 'manual',
+        consentSource: body.consent_source || body.consentSource || null,
         customFields: body.custom_fields || body.customFields || {},
-      }).returning();
+      };
 
-      return respond(201, row);
+      // Upsert: if email already exists in this workspace, merge non-empty fields
+      const [row] = await db
+        .insert(contacts)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [contacts.workspaceId, contacts.email],
+          set: {
+            firstName: sql`COALESCE(EXCLUDED.first_name, contacts.first_name)`,
+            lastName: sql`COALESCE(EXCLUDED.last_name, contacts.last_name)`,
+            phone: sql`COALESCE(EXCLUDED.phone, contacts.phone)`,
+            company: sql`COALESCE(EXCLUDED.company, contacts.company)`,
+            timezone: sql`COALESCE(EXCLUDED.timezone, contacts.timezone)`,
+            state: sql`COALESCE(EXCLUDED.state, contacts.state)`,
+            consentSource: sql`COALESCE(EXCLUDED.consent_source, contacts.consent_source)`,
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
+
+      return respond(row ? 200 : 201, row);
     }
 
     // PUT /contacts/{id}
@@ -125,12 +190,28 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return respond(200, { message: 'Updated' });
     }
 
-    // DELETE /contacts/{id}
+    // DELETE /contacts/{id} — single delete
     if (method === 'DELETE' && pathId) {
       await db.delete(contacts).where(
         and(eq(contacts.contactId, pathId), eq(contacts.workspaceId, workspaceId))
       );
       return respond(204, null);
+    }
+
+    // DELETE /contacts (no id) — bulk delete, body: { ids: string[] }
+    if (method === 'DELETE' && !pathId) {
+      const body = JSON.parse(event.body || '{}');
+      const ids: string[] = Array.isArray(body.ids) ? body.ids.slice(0, 500) : [];
+      if (ids.length === 0) return respond(400, { message: 'No ids provided' });
+
+      const deleted = await db.delete(contacts).where(
+        and(
+          eq(contacts.workspaceId, workspaceId),
+          inArray(contacts.contactId, ids)
+        )
+      ).returning({ contactId: contacts.contactId });
+
+      return respond(200, { deleted: deleted.length });
     }
 
     return respond(405, { message: 'Method not allowed' });

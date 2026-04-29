@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { mockContacts, mockSegments, mockCampaigns, mockTemplates, mockInbox, mockDashboardStats } from './mock-data';
+import { mockDashboardStats } from './mock-data';
 import { config } from './config';
 import { api, ApiError } from './api-client';
 import { contactToApi, settingsToApi } from './api-mappers';
@@ -69,6 +69,8 @@ export interface Contact {
   phone: string;
   company: string;
   timezone?: string;
+  /** US state or province — used for state-specific compliance logic (EBR windows, calling hours, etc.) */
+  state?: string;
   compliance: ContactCompliance;
   segments: string[];
   source: string;
@@ -268,100 +270,24 @@ function getDefaultSettings(): WorkspaceSettings {
   };
 }
 
-function getSeedData(): StoreData {
+function getEmptyData(): StoreData {
   return {
-    contacts: mockContacts.map((c) => {
-      // Build compliance from legacy status field
-      const comp = defaultCompliance();
-      const status = c.status as string;
-      if (status === 'unsubscribed') {
-        comp.email = { suppressed: true, reason: 'unsubscribed', updatedAt: new Date().toISOString() };
-      } else if (status === 'bounced') {
-        comp.email = { suppressed: true, reason: 'bounced', updatedAt: new Date().toISOString() };
-      } else if (status === 'complained') {
-        comp.email = { suppressed: true, reason: 'complained', updatedAt: new Date().toISOString() };
-      }
-      // Apply any per-channel overrides from mock data
-      if (c.compliance) {
-        Object.assign(comp, c.compliance);
-      }
-      return {
-        ...c,
-        compliance: comp,
-        createdAt: new Date().toISOString(),
-      };
-    }),
-    segments: mockSegments.map((s, i) => ({ ...s, folder: '', order: i, color: undefined })),
+    contacts: [],
+    segments: [],
     segmentFolders: [],
-    campaigns: mockCampaigns.map((c) => ({
-      ...c,
-      createdAt: new Date().toISOString(),
-    })),
-    templates: {
-      email: mockTemplates.email.map((t, i) => ({ ...t, folder: '', order: i })),
-      sms: mockTemplates.sms.map((t, i) => ({ ...t, folder: '', order: i })),
-      voice: mockTemplates.voice.map((t, i) => ({ ...t, folder: '', order: i })),
-      webform: [],
-    },
+    campaigns: [],
+    templates: { email: [], sms: [], voice: [], webform: [] },
     templateFolders: [],
-    inbox: mockInbox.map((m) => ({ ...m })),
+    inbox: [],
     settings: getDefaultSettings(),
   };
 }
 
 // ============================================
-// localStorage helpers (workspace-scoped)
+// Workspace hook import
 // ============================================
 
-import { useWorkspace, getDataKey } from './workspace';
-
-function loadStore(workspaceId: string): StoreData {
-  if (typeof window === 'undefined') return getSeedData();
-  const key = getDataKey(workspaceId);
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw) {
-      const parsed = JSON.parse(raw) as StoreData;
-      // Migrate contacts: old `status` field → new `compliance` field
-      if (parsed.contacts?.length && !parsed.contacts[0]!.compliance) {
-        parsed.contacts = parsed.contacts.map((c: any) => {
-          const comp = defaultCompliance();
-          if (c.status === 'unsubscribed') {
-            comp.email = { suppressed: true, reason: 'unsubscribed', updatedAt: c.createdAt };
-          } else if (c.status === 'bounced') {
-            comp.email = { suppressed: true, reason: 'bounced', updatedAt: c.createdAt };
-          } else if (c.status === 'complained') {
-            comp.email = { suppressed: true, reason: 'complained', updatedAt: c.createdAt };
-          }
-          return { ...c, compliance: comp };
-        });
-        // Persist migration
-        localStorage.setItem(key, JSON.stringify(parsed));
-      }
-      // Migrate templates: ensure webform array exists
-      if (!parsed.templates?.webform) {
-        parsed.templates = { ...parsed.templates, webform: [] };
-      }
-      // Migrate: ensure templateFolders exists
-      if (!parsed.templateFolders) {
-        parsed.templateFolders = [];
-      }
-      // Migrate inbox: add channel field to old messages (default to sms)
-      if (parsed.inbox?.length && !(parsed.inbox[0] as any).channel) {
-        parsed.inbox = parsed.inbox.map((m: any) => ({ ...m, channel: 'sms' }));
-      }
-      return parsed;
-    }
-  } catch { /* ignore */ }
-  const seed = getSeedData();
-  localStorage.setItem(key, JSON.stringify(seed));
-  return seed;
-}
-
-function saveStore(workspaceId: string, data: StoreData) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(getDataKey(workspaceId), JSON.stringify(data));
-}
+import { useWorkspace } from './workspace';
 
 // ============================================
 // API data loader — fetches all workspace data from backend
@@ -471,54 +397,35 @@ export function useStore() {
   const { activeWorkspace, hydrated: wsHydrated } = useWorkspace();
   const workspaceId = activeWorkspace.workspaceId;
 
-  const [data, setData] = useState<StoreData>(getSeedData);
+  const [data, setData] = useState<StoreData>(getEmptyData);
   const [hydrated, setHydrated] = useState(false);
-  const useApi = config.isApiConfigured;
+  const [loadError, setLoadError] = useState(false);
 
-  // Reload data when workspace changes
+  // Reload data from API when workspace changes
   useEffect(() => {
-    if (wsHydrated) {
-      if (useApi) {
-        // API mode — fetch from backend, fall back to localStorage on error
-        loadFromApi().then((apiData) => {
-          if (apiData) {
-            setData(apiData);
-          } else {
-            setData(loadStore(workspaceId));
-          }
-          setHydrated(true);
-        }).catch(() => {
-          setData(loadStore(workspaceId));
-          setHydrated(true);
-        });
-      } else {
-        // Local mode — use localStorage
-        setData(loadStore(workspaceId));
-        setHydrated(true);
-      }
-    }
-  }, [workspaceId, wsHydrated, useApi]);
+    if (!wsHydrated) return;
+    setHydrated(false);
+    setLoadError(false);
+    loadFromApi().then((apiData) => {
+      setData(apiData ?? getEmptyData());
+      setHydrated(true);
+      if (!apiData) setLoadError(true);
+    }).catch(() => {
+      setData(getEmptyData());
+      setHydrated(true);
+      setLoadError(true);
+    });
+  }, [workspaceId, wsHydrated]);
 
-  // Persist to localStorage (only when NOT using API)
-  useEffect(() => {
-    if (hydrated && !useApi) {
-      saveStore(workspaceId, data);
-    }
-  }, [data, hydrated, workspaceId, useApi]);
-
-  // Fire-and-forget API call helper (warns on errors, doesn't block UI)
+  // Fire-and-forget API call helper
   const apiCall = useCallback(async <T>(fn: () => Promise<T>): Promise<T | null> => {
-    if (!useApi) return null;
     try {
       return await fn();
     } catch (err) {
-      // Suppress noise — endpoints may not be deployed yet
-      if (process.env.NODE_ENV === 'development') {
-        console.warn(`[API] Endpoint not available yet — mutation queued locally only`);
-      }
+      console.error('[API] Call failed:', err);
       return null;
     }
-  }, [useApi]);
+  }, []);
 
   // ---- CONTACTS ----
 
@@ -606,6 +513,17 @@ export function useStore() {
     }));
     // API: delete contact
     apiCall(() => api.contacts.delete(contactId));
+  }, [apiCall]);
+
+  // Bulk delete — single API call for up to 500 contacts
+  const bulkDeleteContacts = useCallback((contactIds: string[]) => {
+    if (contactIds.length === 0) return;
+    const idSet = new Set(contactIds);
+    setData((prev) => ({
+      ...prev,
+      contacts: prev.contacts.filter((c) => !idSet.has(c.contactId)),
+    }));
+    apiCall(() => api.contacts.bulkDelete(contactIds));
   }, [apiCall]);
 
   // Returns { added, skipped, blankSkipped } — skips contacts with duplicate email/phone and blank/unidentifiable rows
@@ -708,11 +626,22 @@ export function useStore() {
       return { ...prev, contacts: [...created, ...updatedContacts] };
     });
 
-    // Persist new contacts to API (fire-and-forget, don't block import)
+    // Bulk-import to API in chunks of 1,000 — one HTTP request per chunk
+    // instead of one request per contact.
     if (created.length > 0) {
-      for (const c of created) {
-        apiCall(() => api.contacts.create(contactToApi(c)));
+      const chunkSize = 1000;
+      const chunks: Contact[][] = [];
+      for (let i = 0; i < created.length; i += chunkSize) {
+        chunks.push(created.slice(i, i + chunkSize));
       }
+      // Fire chunks in parallel (they're independent upserts)
+      apiCall(() =>
+        Promise.all(
+          chunks.map((chunk) =>
+            api.contacts.import(chunk.map((c) => contactToApi(c)))
+          )
+        )
+      );
     }
 
     return { added, updated, skipped, blankSkipped };
@@ -1178,11 +1107,11 @@ export function useStore() {
 
   // ---- RESET ----
 
-  const resetData = useCallback(() => {
-    const seed = getSeedData();
-    setData(seed);
-    saveStore(workspaceId, seed);
-  }, [workspaceId]);
+  const resetData = useCallback(async () => {
+    setData(getEmptyData());
+    const fresh = await loadFromApi();
+    if (fresh) setData(fresh);
+  }, []);
 
   return {
     ...data,
@@ -1190,10 +1119,12 @@ export function useStore() {
     settings,
     stats,
     hydrated,
+    loadError,
     addContact,
     updateContact,
     updateCompliance,
     deleteContact,
+    bulkDeleteContacts,
     importContacts,
     addCampaign,
     markRead,

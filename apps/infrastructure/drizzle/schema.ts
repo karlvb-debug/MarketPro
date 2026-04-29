@@ -89,6 +89,7 @@ export const contacts = pgTable('contacts', {
   lastName: varchar('last_name', { length: 100 }),
   company: varchar('company', { length: 255 }),
   timezone: varchar('timezone', { length: 50 }),          // e.g. 'America/New_York' — used by TCPA engine
+  state: varchar('state', { length: 2 }),                  // US state / province code — used for state-specific compliance rules
   status: contactStatusEnum('status').notNull().default('active'),
   source: varchar('source', { length: 50 }),              // 'csv_import', 'api', 'manual'
   consentSource: consentSourceEnum('consent_source'),     // How consent was obtained

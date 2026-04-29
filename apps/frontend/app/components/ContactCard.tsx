@@ -48,6 +48,7 @@ export default function ContactCard({
     email: contact.email,
     phone: contact.phone,
     company: contact.company,
+    state: contact.state || '',
   });
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -59,6 +60,7 @@ export default function ContactCard({
       email: contact.email,
       phone: contact.phone,
       company: contact.company,
+      state: contact.state || '',
     });
   };
 
@@ -184,6 +186,23 @@ export default function ContactCard({
           ) : (
             <span className="cc-detail-value">
               {contact.company || <span className="text-tertiary">—</span>}
+            </span>
+          )}
+        </div>
+
+        <div className="cc-detail-row">
+          <span className="cc-detail-icon">📍</span>
+          <span className="cc-detail-label">State</span>
+          {isEditing ? (
+            <FormInput
+              placeholder="e.g. CA, FL, TX"
+              value={editData.state}
+              onChange={(e) => setEditData({ ...editData, state: e.target.value.toUpperCase().slice(0, 2) })}
+              style={{ textTransform: 'uppercase', maxWidth: 80 }}
+            />
+          ) : (
+            <span className="cc-detail-value">
+              {contact.state || <span className="text-tertiary">—</span>}
             </span>
           )}
         </div>
