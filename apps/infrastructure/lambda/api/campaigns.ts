@@ -5,9 +5,15 @@
 // ============================================
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { eq } from 'drizzle-orm';
 import { getDb, respond, getWorkspaceId, getUserId } from '../lib/db';
 import { campaigns } from '../../drizzle/schema';
+
+const sqs = new SQSClient({});
+const EMAIL_QUEUE_URL = process.env.EMAIL_DISPATCH_QUEUE_URL;
+const SMS_QUEUE_URL = process.env.SMS_DISPATCH_QUEUE_URL;
+const VOICE_QUEUE_URL = process.env.VOICE_DISPATCH_QUEUE_URL;
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   const method = event.httpMethod;
@@ -44,6 +50,39 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         status: body.status || 'draft',
         scheduledAt: body.scheduled_at ? new Date(body.scheduled_at) : null,
       }).returning();
+
+      // Dispatch to SQS if email channel and it's time to send (or no schedule)
+      if (row.channel === 'email' && EMAIL_QUEUE_URL && (!row.scheduledAt || row.scheduledAt <= new Date())) {
+        await sqs.send(new SendMessageCommand({
+          QueueUrl: EMAIL_QUEUE_URL,
+          MessageBody: JSON.stringify({
+            campaignId: row.campaignId,
+            workspaceId: row.workspaceId,
+          }),
+        }));
+        await db.update(campaigns).set({ status: 'sending' }).where(eq(campaigns.campaignId, row.campaignId));
+        row.status = 'sending';
+      } else if (row.channel === 'sms' && SMS_QUEUE_URL && (!row.scheduledAt || row.scheduledAt <= new Date())) {
+        await sqs.send(new SendMessageCommand({
+          QueueUrl: SMS_QUEUE_URL,
+          MessageBody: JSON.stringify({
+            campaignId: row.campaignId,
+            workspaceId: row.workspaceId,
+          }),
+        }));
+        await db.update(campaigns).set({ status: 'sending' }).where(eq(campaigns.campaignId, row.campaignId));
+        row.status = 'sending';
+      } else if (row.channel === 'voice' && VOICE_QUEUE_URL && (!row.scheduledAt || row.scheduledAt <= new Date())) {
+        await sqs.send(new SendMessageCommand({
+          QueueUrl: VOICE_QUEUE_URL,
+          MessageBody: JSON.stringify({
+            campaignId: row.campaignId,
+            workspaceId: row.workspaceId,
+          }),
+        }));
+        await db.update(campaigns).set({ status: 'sending' }).where(eq(campaigns.campaignId, row.campaignId));
+        row.status = 'sending';
+      }
 
       return respond(201, row);
     }

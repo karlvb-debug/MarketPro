@@ -5,7 +5,7 @@ import { Pool } from 'pg';
 import { accountBalances, transactionsLedger } from '../drizzle/schema';
 import { eq, sql } from 'drizzle-orm';
 
-// @ts-expect-error Stripe v22+ has updated type exports
+
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
 
 let pool: Pool | null = null;

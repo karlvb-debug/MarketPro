@@ -3,6 +3,7 @@ import { Construct } from 'constructs';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as lambdaNodejs from 'aws-cdk-lib/aws-lambda-nodejs';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as rds from 'aws-cdk-lib/aws-rds';
@@ -16,6 +17,9 @@ export interface ApiStackProps extends cdk.StackProps {
   dbSecret: secretsmanager.ISecret;
   userPool: cognito.UserPool;
   userPoolClient: cognito.UserPoolClient;
+  emailDispatchQueue?: sqs.IQueue;
+  smsDispatchQueue?: sqs.IQueue;
+  voiceDispatchQueue?: sqs.IQueue;
   frontendUrl?: string;
 }
 
@@ -111,8 +115,23 @@ export class ApiStack extends cdk.Stack {
       ...commonLambdaProps,
       entry: path.join(__dirname, '../lambda/api/campaigns.ts'),
       handler: 'handler',
+      environment: {
+        ...commonLambdaProps.environment,
+        EMAIL_DISPATCH_QUEUE_URL: props.emailDispatchQueue?.queueUrl || '',
+        SMS_DISPATCH_QUEUE_URL: props.smsDispatchQueue?.queueUrl || '',
+        VOICE_DISPATCH_QUEUE_URL: props.voiceDispatchQueue?.queueUrl || '',
+      },
     });
     props.dbSecret.grantRead(campaignsLambda);
+    if (props.emailDispatchQueue) {
+      props.emailDispatchQueue.grantSendMessages(campaignsLambda);
+    }
+    if (props.smsDispatchQueue) {
+      props.smsDispatchQueue.grantSendMessages(campaignsLambda);
+    }
+    if (props.voiceDispatchQueue) {
+      props.voiceDispatchQueue.grantSendMessages(campaignsLambda);
+    }
 
     const settingsLambda = new lambdaNodejs.NodejsFunction(this, 'SettingsFunction', {
       ...commonLambdaProps,

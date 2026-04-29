@@ -36,11 +36,15 @@ export default function TemplatesPage() {
   // Modals
   const [showNewEmail, setShowNewEmail] = useState(false);
   const [showNewSms, setShowNewSms] = useState(false);
+  const [showNewVoice, setShowNewVoice] = useState(false);
   const [showNewWebForm, setShowNewWebForm] = useState(false);
   const [emailName, setEmailName] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
   const [smsName, setSmsName] = useState('');
   const [smsBody, setSmsBody] = useState('');
+  const [voiceName, setVoiceName] = useState('');
+  const [voiceSsml, setVoiceSsml] = useState('');
+  const [voiceId, setVoiceId] = useState('Joanna');
   const [webFormName, setWebFormName] = useState('');
   const [webFormDesc, setWebFormDesc] = useState('');
 
@@ -100,9 +104,17 @@ export default function TemplatesPage() {
     setSmsName(''); setSmsBody(''); setShowNewSms(false);
   };
 
+  const handleAddVoice = (e: React.FormEvent) => {
+    e.preventDefault();
+    store.addVoiceTemplate({ name: voiceName, ssmlContent: voiceSsml, voiceId });
+    showToast(`"${voiceName}" created`);
+    setVoiceName(''); setVoiceSsml(''); setShowNewVoice(false);
+  };
+
   const handleNewClick = () => {
     if (activeType === 'email') setShowNewEmail(true);
     else if (activeType === 'sms') setShowNewSms(true);
+    else if (activeType === 'voice') setShowNewVoice(true);
     else if (activeType === 'webform') setShowNewWebForm(true);
   };
 
@@ -383,6 +395,33 @@ export default function TemplatesPage() {
           <FormActions>
             <button type="button" className="btn btn-secondary" onClick={() => setShowNewSms(false)}>Cancel</button>
             <button type="submit" className="btn btn-primary">Save Message</button>
+          </FormActions>
+        </form>
+      </Modal>
+
+      {/* ===== NEW VOICE MODAL ===== */}
+      <Modal isOpen={showNewVoice} onClose={() => setShowNewVoice(false)} title="New Voice Call Script">
+        <form onSubmit={handleAddVoice}>
+          <FormField label="Name" required>
+            <FormInput placeholder="e.g. Payment Reminder" required value={voiceName} onChange={(e) => setVoiceName(e.target.value)} />
+          </FormField>
+          <FormField label="Voice Personality" required>
+            <select className="eb-settings-input" value={voiceId} onChange={(e) => setVoiceId(e.target.value)} required>
+              <option value="Joanna">Joanna (US English, Female)</option>
+              <option value="Matthew">Matthew (US English, Male)</option>
+              <option value="Salli">Salli (US English, Female)</option>
+              <option value="Joey">Joey (US English, Male)</option>
+            </select>
+          </FormField>
+          <FormField label="SSML Content" required hint="Use SSML to control pronunciation and pacing">
+            <FormTextarea placeholder="<speak>Hello {{first_name}}...</speak>" required value={voiceSsml} onChange={(e) => setVoiceSsml(e.target.value)} style={{ minHeight: '120px', fontFamily: 'monospace' }} />
+          </FormField>
+          <div className="info-box" style={{ marginBottom: 'var(--space-5)', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
+            <strong>Merge tags:</strong> Use {'{{first_name}}'}, {'{{last_name}}'}, {'{{company}}'}. Must wrap message in {'<speak>'} tags.
+          </div>
+          <FormActions>
+            <button type="button" className="btn btn-secondary" onClick={() => setShowNewVoice(false)}>Cancel</button>
+            <button type="submit" className="btn btn-primary">Save Script</button>
           </FormActions>
         </form>
       </Modal>

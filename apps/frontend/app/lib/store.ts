@@ -924,6 +924,33 @@ export function useStore() {
     }));
   }, [apiCall]);
 
+  const addVoiceTemplate = useCallback((template: { name: string; ssmlContent: string; voiceId?: string }) => {
+    setData((prev) => {
+      const maxOrder = prev.templates.voice.reduce((m, t) => Math.max(m, t.order || 0), -1);
+      return {
+        ...prev,
+        templates: {
+          ...prev.templates,
+          voice: [...prev.templates.voice, {
+            scriptId: crypto.randomUUID(),
+            name: template.name,
+            ssmlContent: template.ssmlContent,
+            voiceId: template.voiceId || 'Joanna',
+            folder: '',
+            order: maxOrder + 1,
+            updatedAt: new Date().toISOString(),
+          }],
+        },
+      };
+    });
+    // API: create voice template
+    apiCall(() => api.templates.voice.create({
+      name: template.name,
+      ssml_content: template.ssmlContent,
+      voice_id: template.voiceId || 'Joanna',
+    }));
+  }, [apiCall]);
+
   const addWebForm = useCallback((form: { name: string; description: string }) => {
     setData((prev) => {
       const maxOrder = prev.templates.webform.reduce((m, t) => Math.max(m, t.order), -1);
@@ -1141,6 +1168,7 @@ export function useStore() {
     toggleFolderExpanded,
     addSmsTemplate,
     addEmailTemplate,
+    addVoiceTemplate,
     addWebForm,
     deleteTemplate,
     renameTemplate,

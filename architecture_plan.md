@@ -1,211 +1,313 @@
-Title: AWS Bulk Marketing Tool Architecture Plan
+# MarketPro — AWS Multi-Channel Marketing Platform
 
-Source: https://docs.google.com/document/d/e/2PACX-1vT77fiDMWwlvbs4PTiE3T5pJzH-7t92yPvdFwKwPc_G9ZADqKElod2501YyF-F9LMDiNp_bl78YapXJ/pub
+> Architecture & Implementation Plan
 
 ---
 
-[Report abuse](https://drive.google.com/abuse?id=AKkXjoythXNtEVZBG_pwmDQIYr5pKxu2kN1lw2KTisnffT0DX0WejWnO7_87SsYXJMc8IDrgdXwYhuna1LyIyEY:0&docurl=https://docs.google.com/document/d/e/2PACX-1vT77fiDMWwlvbs4PTiE3T5pJzH-7t92yPvdFwKwPc_G9ZADqKElod2501YyF-F9LMDiNp_bl78YapXJ/pub)
-[Learn more](https://support.google.com/docs/answer/183965)
-
 ## 1. Executive Summary
-This document outlines the architecture and implementation plan for a multi-channel bulk marketing platform (Email, SMS, Voice) built entirely on native AWS services. By leveraging AWS's managed messaging, database, and serverless compute services, the platform will be highly scalable, cost-effective, and capable of handling millions of outbound messages while tracking granular engagement metrics.
-The core of this platform revolves around a highly decoupled, serverless orchestration engine (using AWS Step Functions and EventBridge), Amazon SES (for email delivery, templates, and reputation), AWS End User Messaging (for telecom compliance and SMS delivery), Amazon Connect (for advanced voice dialing, AMD, and IVR), and a Double-Entry Billing Ledger to track usage, apply markups, and reconcile asynchronously.
+
+MarketPro is a multi-channel bulk marketing platform (Email, SMS, Voice) built entirely on native AWS services. The platform is designed to be highly scalable, cost-effective, and capable of handling millions of outbound messages while tracking granular engagement metrics and enforcing strict regulatory compliance (TCPA, CAN-SPAM, GDPR/CCPA).
+
+The architecture revolves around a decoupled, serverless orchestration engine using SQS-driven dispatch queues, Amazon SES for email delivery, AWS End User Messaging / Pinpoint for SMS, Amazon Connect for voice dialing with AMD, and a Double-Entry Billing Ledger for usage tracking and reconciliation.
+
+---
 
 ## 2. Core Service Mapping
-Component
-Service
-Purpose
-Frontend/Hosting
-AWS Amplify, S3, CloudFront
-Host the React/Vue web application for user portal.
-Authentication
-Amazon Cognito
-Secure user login, MFA, and identity management.
-API Layer
-Amazon API Gateway, AWS Lambda
-Serverless backend; Lambda Authorizers resolve Workspace permissions.
-Primary Database
-Amazon RDS (PostgreSQL)
-The Single System of Record (Source of Truth) for Contacts, Consent, and Billing Ledgers.
-Ephemeral State
-Amazon DynamoDB
-Strictly used for high-throughput ephemeral state (Idempotency keys, WebSocket connections, Support Audit Logs).
-Contact Import
-Amazon S3, AWS Step Functions
-S3 for CSV uploads; Step Functions to orchestrate batch processing.
-Campaign Orchestration
-AWS EventBridge, SQS, Step Functions
-EventBridge for scheduling; Step Functions for execution; SQS for strict rate limiting.
-Email Engine
-Amazon SES
-Raw sending, domain authentication, and SES native templates.
-SMS Engine
-AWS End User Messaging (SMS)
-Number provisioning, 10DLC registration, outbound/inbound routing.
-Voice Engine
-Amazon Connect (Outbound Campaigns)
-High-volume outbound dialing, Answering Machine Detection (AMD), IVR, and live-agent handoff.
-Analytics
-Amazon Kinesis (Firehose), Athena, QuickSight
-Streaming engagement events to S3, querying via Athena.
-Billing & Payments
-Stripe API, Amazon SQS, EventBridge
-Stripe for MRR/usage payments; SQS for transactional billing events; EventBridge for reconciliation.
+
+| Component | AWS Service | Purpose |
+|---|---|---|
+| Frontend | Next.js on Amplify / S3 + CloudFront | React web application for the user portal |
+| Authentication | Amazon Cognito | User login, MFA, RBAC, and workspace identity |
+| API Layer | API Gateway + Lambda | Serverless REST backend with Lambda Authorizers |
+| Primary Database | Amazon RDS (PostgreSQL) | Single System of Record for Contacts, Consent, Billing |
+| Ephemeral State | Amazon DynamoDB | Idempotency keys, WebSocket state, Audit Logs |
+| Contact Import | Amazon S3 + Step Functions | CSV uploads with chunked batch processing |
+| Campaign Orchestration | SQS + Lambda | Per-channel dispatch queues with event-source mapping |
+| Email Engine | Amazon SES | Domain auth (DKIM/SPF/DMARC), templates, raw sending |
+| SMS Engine | AWS End User Messaging (Pinpoint) | 10DLC registration, number provisioning, outbound SMS |
+| Voice Engine | Amazon Connect | Outbound dialing, AMD, IVR Contact Flows, Polly TTS |
+| Analytics | Kinesis Firehose + Athena + QuickSight | Streaming events to S3 Data Lake, queried via Athena |
+| Billing | Stripe + SQS + EventBridge | MRR subscriptions, usage-based pre-paid ledger |
+
+---
+
+## 3. Platform Modules
 
 ### Module A: Contact Management, Segmentation & State Minimization
-- Single System of Record (State Consolidation):
-- To eliminate race conditions and simplify compliance (GDPR/CCPA deletions), the platform enforces strict state minimization. Amazon RDS (PostgreSQL) is the sole persistent store for workspace configs, contact profiles, segments, consent, and billing.
-- Campaign audiences are NOT synced to secondary stores. They are queried from RDS just-in-time during campaign execution and injected directly into stateless dispatch queues (SQS).
-- Multi-Channel Ingestion:
-- CSV Uploads: Users upload CSV files via the frontend to a secure Amazon S3 bucket. An S3 event triggers an AWS Step Function that parses the file in chunks (using Lambda), sanitizes data, and loads it into RDS.
-- API & Webhooks: Expose API Gateway endpoints for real-time CRM syncs.
-- Data Hygiene & Validation:
-- Duplicate Detection & Merging: Automatically merge duplicates by phone number/email using PostgreSQL UPSERT rules.
-- FTC/National DNC Integration & Scrubbing: Require users to input their FTC Subscription Account Number (SAN), manage billing for access beyond the 5 free area codes, and automate the legally required 31-day rolling scrubs to maintain safe harbor status.
-- Pre-Send Verification: Integrate a third-party email validation API during import to flag risky emails.
-- Contact Profiles & Consent Evidence System:
-- TCPA Consent Ledger: The system enforces a strict, immutable "Consent Ledger" in RDS for SMS/Voice tracking the Source, Timestamp, exact Disclosure Text version, Purpose, and a complete Revocation Chain.
-- GDPR/CCPA "Right to be Forgotten": Implemented via a strict Data Retention Matrix (see Section 5B) that balances consumer privacy rights with the platform's legal obligation to maintain TCPA defense records and financial billing accuracy.
+
+- **Single System of Record**: Amazon RDS (PostgreSQL) is the sole persistent store for workspace configs, contact profiles, segments, consent, and billing. Campaign audiences are queried just-in-time during execution and injected into stateless SQS dispatch queues — never synced to secondary stores.
+- **Multi-Channel Ingestion**:
+  - *CSV Uploads*: Users upload via the frontend to S3. An S3 event triggers a Step Function that parses in chunks, sanitizes data, and loads into RDS.
+  - *Bulk API*: The `/contacts/import` endpoint supports batch upserts with server-side validation and deduplication.
+  - *API & Webhooks*: API Gateway endpoints for real-time CRM syncs.
+- **Data Hygiene & Validation**:
+  - *Duplicate Detection*: PostgreSQL UPSERT rules merge by phone/email.
+  - *FTC/National DNC Scrubbing*: Users provide their FTC SAN; the platform automates 31-day rolling scrubs for safe harbor status.
+  - *Pre-Send Verification*: Third-party email validation API flags risky addresses during import.
+- **Consent Evidence System**:
+  - *TCPA Consent Ledger*: Immutable ledger in RDS tracking Source, Timestamp, Disclosure Text version, Purpose, and Revocation Chain.
+  - *GDPR/CCPA "Right to be Forgotten"*: Handled via the Data Retention Matrix (see Section 6B).
 
 ### Module B: Email Marketing
-- Domain, DNS & Deliverability Management:
-- Core Authentication: Backend integrates with the Amazon SES API to generate DKIM, SPF, and DMARC DNS records.
-- SES Sandbox Clarification: Note: The platform administrator must manually submit a request to AWS Support to move the master AWS account out of the SES sandbox prior to production launch. Once the master account is in production, individual verified tenant domains can send freely.
-- Custom Tracking Domains: Configure custom subdomains (e.g., link.userdomain.com) to protect sender reputation.
-- Dedicated IP & Warmup: For high-volume senders, provision SES Managed Dedicated IPs, which automatically handle IP warmup routing natively without requiring custom Lambda throttling or over-engineered warmup logic.
-- Content, Personalization & Testing:
-- Template Builder: The UI features a drag-and-drop builder (e.g., GrapesJS). HTML is saved as an Amazon SES Template.
-- Asset Hosting: Images are served globally via Amazon CloudFront.
-- Dynamic Merge Tags: Support personalization attributes (e.g., {{first_name}}) using SES's native replacement tags.
-- A/B Testing (Split Testing): The backend splits the segment, measures the winner, and auto-sends to the remainder.
-- Monitoring, Compliance & The Gmail Blindspot Mitigation:
-- One-Click Unsubscribe (RFC 8058): Automatically inject List-Unsubscribe headers into every outgoing email. This ensures that when a user clicks the native "Unsubscribe" button in Gmail/Yahoo, a standardized HTTPS webhook or mailto event is routed back to the platform for instant suppression.
-- Aggregate Domain Health (Google Postmaster Tools): Gmail does not return standard abuse complaints (ARF) to SES. Therefore, knowing exactly who marked a message as spam is impossible. Workspaces must verify sending domains with Google Postmaster Tools. The platform provides a "Pro" feature/integration guiding the user to authorize a Service Account email as a "Reader" in their Postmaster dashboard, allowing the platform to poll metrics safely.
-- Engagement Sunsetting: Because the platform cannot rely on Gmail for individual spam reports, it enforces a strict "Sunset Policy" in RDS. If a Gmail recipient has not opened or clicked an email from the workspace in X months (e.g., 6 months), the system automatically suppresses them to protect the domain's inbox placement.
 
-- Telephony Asset Lifecycle (Number Procurement & Association):
-- Provisioning & Ownership: Utilize AWS End User Messaging API to search and purchase numbers. Numbers are strictly mapped to a specific workspace_id in RDS, defining absolute tenant ownership.
-- Omnichannel Sharing: If a workspace utilizes both SMS and Voice, the system explicitly associates the End User Messaging number with the shared Amazon Connect instance via API, allowing the tenant to use a single, recognizable Caller ID for both texts and calls.
-- Tenant Offboarding: Upon workspace deletion, numbers are unassociated from Connect, 10DLC campaigns are deactivated, and the number is either released back to AWS or ported out based on the user's request.
-- Registration Flows: Submit brand and campaign data to AWS for 10DLC registration or Toll-Free Verification (TFV). Given TCR (The Campaign Registry) approval can take 2-14 days and involves manual vetting, the UI/UX must seamlessly accommodate this delayed state. SMS dispatching must remain locked until asynchronous AWS SNS webhooks confirm full approval.
-- Content, Personalization & Link Tracking:
-- Encoding-Aware Message Composer: A flat 160-character rule is insufficient and leads to billing disputes. The UI utilizes real-time, encoding-aware segment calculation.
-- If strictly GSM-7 characters are used, segments are 160 characters (153 for multipart).
-- If a single Unicode / UCS-2 character (e.g., an emoji, accented letter, or pasted "smart quote") is detected, the composer automatically alerts the user, drops the segment limit to 70 characters (67 for multipart), and instantly recalculates the estimated billing cost.
-- Custom URL Shortener: Internal URL shortener using API Gateway & DynamoDB (txt.brand.com/xY7z) for precise click tracking.
-- Scheduling, Sending & Compliance Enforcement:
-- Dynamic Timezone & "Quiet Hours" Enforcement: The Step Function orchestrator utilizes a waterfall Timezone Resolution Engine:
-1. Explicit Data: User-provided CRM timezone.
-2. Third-Party HLR/CNAM Lookup: Real-time carrier lookup via specialized third-party compliance APIs (e.g., Telesign, Twilio Lookup) to determine the number's actual registered physical state. Note: Native AWS phone lookup APIs provide country/region data but do not provide reliable U.S. state/timezone data required for TCPA compliance, making this external API integration mandatory.
-3. NPA Fallback with Safety Buffer: Buffered area code fallback (e.g., waiting until 11 AM EST to ensure it's safely 8 AM PST).
-- Throughput & Queue Management: Dispatching uses Amazon SQS as a buffer. Since SQS natively controls concurrency rather than exact throughput (TPS), strict 10DLC permitted TPS limits will be enforced using an ElastiCache (Redis) Token Bucket algorithm inside the dispatch Lambdas.
-- Two-Way Messaging & Mandatory Keywords:
-- Inbound Routing: Inbound messages route to an SNS Topic.
-- Automated Keyword Handling: Lambda natively supports STOP/UNSUBSCRIBE and HELP.
+- **Domain & Deliverability**:
+  - Core DKIM, SPF, and DMARC authentication via the SES API.
+  - SES Managed Dedicated IPs with automatic warmup for high-volume senders.
+  - Custom tracking subdomains (e.g., `link.userdomain.com`).
+  - *Note*: The AWS account must be moved out of the SES sandbox before production launch.
+- **Content & Personalization**:
+  - Visual email builder at `/email-builder` (GrapesJS). HTML saved as SES Templates.
+  - Image assets served globally via CloudFront.
+  - Dynamic merge tags (`{{first_name}}`, `{{last_name}}`, `{{company}}`).
+  - A/B split testing with auto-winner logic.
+- **Compliance & The Gmail Blindspot**:
+  - One-Click Unsubscribe (RFC 8058) headers on every outgoing email.
+  - Google Postmaster Tools integration for aggregate domain health monitoring.
+  - Engagement Sunsetting: auto-suppress Gmail recipients inactive for 6+ months.
 
-### Module D: Voice Calling (Amazon Connect Integration)
-- Amazon Connect Tenancy Model (Pooled Instance):
-- To avoid hitting strict AWS account limits (e.g., maximum Connect instances per account) and to minimize operational overhead, the platform utilizes a Single Shared (Pooled) Amazon Connect Instance rather than a siloed instance per tenant. Note: AWS Support must be proactively contacted to significantly raise default service quotas for "Concurrent active calls" and "Outbound calls per second" on this pooled instance before onboarding major clients.
-- Logical Isolation Strategy: When a workspace provisions voice features, the backend provisions a dedicated Routing Profile and Queue. The shared numbers procured in Module C are associated here. Every outbound contact is injected with a workspace_id Contact Attribute to govern routing logic and data segregation.
-- Orchestration & IVR (Amazon Connect Outbound Campaigns):
-- Contact Flows (IVR): Users build IVR experiences within the UI, which translates into shared Amazon Connect Contact Flows. The flows use the injected workspace_id attribute to fetch workspace-specific Amazon Polly SSML scripts.
-- Answering Machine Detection (AMD): Utilize Amazon Connect's native AMD. If a voicemail is detected, inject a pre-recorded "Voicemail Drop" and disconnect gracefully.
-- Number Management & Reputation:
-- Verifiable Regional Presence (No Neighbor Spoofing): Enforce a Verifiable Regional Presence strategy using the static, localized numbers owned by the workspace in Module C.
-- STIR/SHAKEN Attestation & Caller ID Authentication: Register workspace business profiles to achieve "A-Level" STIR/SHAKEN attestation. Crucial Distinction: A-Level attestation solely verifies caller ID authenticity (anti-spoofing). It does not guarantee answer rates or prevent third-party analytics engines from applying "Spam Likely" labels.
-- Spam Label Mitigation: To actively manage reputation, workspaces must systematically register their dedicated numbers with major carrier analytics databases (e.g., FreeCallerRegistry, First Orion, Hiya) and rely on the platform's telemetry to pause campaigns with chronically low answer rates or short durations.
+### Module C: SMS Marketing (AWS End User Messaging)
+
+- **Telephony Asset Lifecycle**:
+  - Number provisioning via AWS End User Messaging API, mapped to `workspace_id` in RDS.
+  - Omnichannel sharing: numbers associated with the Amazon Connect instance for unified Caller ID.
+  - 10DLC registration and Toll-Free Verification flows with async approval handling.
+- **Content & Personalization**:
+  - Encoding-aware composer: GSM-7 at 160 chars (153 multipart) vs. Unicode/UCS-2 at 70 chars (67 multipart) with real-time segment recalculation.
+  - Custom URL shortener (`txt.brand.com/xY7z`) via API Gateway + DynamoDB for click tracking.
+- **Scheduling & Compliance**:
+  - Waterfall Timezone Resolution Engine: (1) Explicit CRM data → (2) HLR/CNAM carrier lookup → (3) NPA area code fallback with safety buffer.
+  - 10DLC TPS rate limiting via ElastiCache (Redis) Token Bucket inside dispatch Lambdas.
+  - Two-Way Messaging: Inbound routed to SNS Topic; Lambda handles STOP/HELP keywords automatically.
+
+### Module D: Voice Calling (Amazon Connect)
+
+- **Pooled Connect Instance**: Single shared instance to avoid AWS account limits. Logical tenant isolation via dedicated Routing Profiles, Queues, and `workspace_id` Contact Attributes.
+- **Contact Flows & IVR**: Users compose SSML scripts in the UI. The dispatch Lambda injects workspace-specific scripts and Polly voice settings as Contact Attributes into the Connect flow.
+- **Answering Machine Detection (AMD)**: Native Connect AMD with configurable voicemail drop and graceful disconnect.
+- **Number Reputation**: Verifiable Regional Presence (no neighbor spoofing), STIR/SHAKEN A-Level attestation, and registration with carrier analytics databases (FreeCallerRegistry, First Orion, Hiya).
 
 ### Module E: Multi-Brand Workspace Management (Agency Mode)
-- Independent Workspaces (Modern AWS Resource Mapping):
-- SES Tenant-Level Features & Virtual Deliverability Manager (VDM): The platform utilizes modern SES multi-tenant capabilities. A tenant_id is injected into all outgoing message tags, natively integrating with SES VDM for tenant-level metrics and reputation pausing.
-- Data Isolation: All contact lists, segments, templates, and consent ledgers are strictly siloed in PostgreSQL using workspace_id foreign keys. Connect CTRs (Contact Trace Records) in the Data Lake are partitioned by the workspace_id Contact Attribute.
-- Role-Based Access Control (RBAC):
-- A single Cognito User can have different permission levels across different workspaces.
+
+- **Tenant Isolation**: All data siloed by `workspace_id` foreign keys in PostgreSQL. SES VDM tags with `tenant_id` for per-workspace deliverability metrics. Connect CTRs partitioned by `workspace_id`.
+- **RBAC**: A single Cognito user can hold different permission levels (owner, admin, editor, viewer) across multiple workspaces.
 
 ### Module F: Billing, Accounting & Immutable Ledger
-- SaaS Base Subscription (MRR):
-- Users pay a monthly SaaS platform fee via Stripe Billing.
-- Double-Entry Pre-Paid Ledger (Accounting Discipline):
-- Billing state is strictly maintained in PostgreSQL using a double-entry accounting ledger to ensure zero orphaned credits.
-- Every workspace has an Account_Balance table and a Transactions_Ledger table.
-- Authorization vs. Capture: When a campaign is scheduled, the orchestrator queries RDS, calculates the estimated cost, and creates an AUTHORIZATION entry (putting credits on hold).
-- Idempotent Event Processing (SNS Fan-Out to SQS):
-- As delivery, bounce, and failure events are generated by AWS services, they are published to a central Amazon SNS Topic.
-- SNS fans out these events to an Amazon SQS Billing Queue. A Lambda function consumes from this queue, ensuring guaranteed delivery and DLQ (Dead Letter Queue) capabilities for financial transactions.
-- Crucial: To handle carrier delays and duplicate webhook firings, DynamoDB is used strictly as an Idempotency Store. The Message_ID acts as the primary key with a 7-day TTL. If an event ID already exists in DynamoDB, the billing Lambda safely discards it, preventing double-charging. If new, it executes a CAPTURE or REFUND in the RDS ledger.
-- Asynchronous Reconciliation:
-- Carrier events can be lost or delayed by days. An EventBridge Cron Job runs a nightly reconciliation process. It compares authorized campaign holds in RDS against captured delivery receipts. Any authorizations older than 72 hours without matching delivery receipts are automatically refunded to the user's ledger.
-- Auto-Recharge:
-- Auto-charge via Stripe when the available ledger balance falls below a threshold.
 
-- Super Admin Identity: Separate Cognito Group for your internal company employees.
-- Secure Support Access (Zero-Trust Impersonation):
-- "Impersonation" is inherently risky. To prevent abuse, support access requires:
-1. Step-Up Authentication: Support agents must pass a fresh MFA prompt to initiate the flow.
-2. Reason Codes: The agent must supply a valid Zendesk/Jira ticket ID.
-3. Short-Lived Sessions: The generated impersonation JWT is strictly bound to a 15-minute expiration.
-4. Immutable Audit Logs: Every API request executed under the impersonated token is logged to a write-only DynamoDB Audit Table.
-- Global Kill Switches: API endpoints for Super Admins to instantly pause a specific workspace's SES/SNS queue or Connect dialer.
+- **SaaS Subscription (MRR)**: Monthly platform fee via Stripe Billing.
+- **Double-Entry Pre-Paid Ledger**: PostgreSQL-backed ledger with `account_balances` and `transactions_ledger` tables. Authorization holds placed at campaign schedule time; captured or refunded upon delivery receipt.
+- **Idempotent Event Processing**: Delivery/bounce/failure events published to a central SNS Topic → SQS Billing Queue → Lambda consumer. DynamoDB Idempotency Store (7-day TTL) prevents double-charging.
+- **Nightly Reconciliation**: EventBridge cron sweeps stale authorizations (>72 hours without delivery receipt) and auto-refunds.
+- **Auto-Recharge**: Stripe charge triggered when available balance falls below threshold.
+
+### Module G: Super Admin & Support
+
+- **Super Admin**: Separate Cognito Group for internal employees.
+- **Zero-Trust Impersonation**: Step-up MFA, reason code (ticket ID), 15-minute JWT, immutable DynamoDB audit log.
+- **Global Kill Switches**: Instantly pause a workspace's SES/SQS/Connect dispatch.
+
+---
+
+## 4. Data Pipelines
 
 ### A. Data Ingestion & Hygiene Pipeline
-1. Upload: User uploads CSV to S3 Bucket.
-2. Orchestration: Step Functions process chunks via Lambda.
-3. Validation: Scrubbed against FTC DNC registries and deduplicated.
-4. Storage: Clean records persisted directly to Amazon RDS (Single System of Record).
+
+1. **Upload**: User uploads CSV to S3 via `ImportWizard.tsx` or the `/contacts/import` bulk API.
+2. **Orchestration**: Step Functions process chunks via Lambda (`csv-parser.ts`, `csv-upload-trigger.ts`).
+3. **Validation**: Scrubbed against FTC DNC registries, deduplicated via PostgreSQL UPSERT.
+4. **Storage**: Clean records persisted to RDS (Single System of Record).
 
 ### B. Campaign Orchestration & Dispatch Pipeline
-1. Trigger: Amazon EventBridge triggers the Campaign Orchestrator.
-2. Segmentation & Authorization: Lambda queries RDS to generate the segment, calculates estimated cost, and creates a hold in the RDS Double-Entry Ledger.
-3. Queueing: Push message jobs directly to Amazon SQS with workspace routing rules and a unique Message_ID.
-4. Dispatch: SQS consumers pull at allowed TPS rates, verify the Timezone Resolution Engine, and fire API calls to SES, End User Messaging, or Amazon Connect Outbound Campaigns.
+
+1. **Trigger**: User creates a campaign via `POST /campaigns`. The `campaigns.ts` Lambda detects the channel and pushes a message to the corresponding SQS dispatch queue.
+2. **Queue Routing**:
+   - Email → `EmailDispatchQueue` → `dispatch-email.ts`
+   - SMS → `SmsDispatchQueue` → `dispatch-sms.ts`
+   - Voice → `VoiceDispatchQueue` → `dispatch-voice.ts`
+3. **Dispatch**: Each Lambda fetches the campaign, template, and segment contacts from RDS. It performs merge-tag replacement and calls the appropriate AWS API (SES `SendEmailCommand`, Pinpoint `SendMessagesCommand`, or Connect `StartOutboundVoiceContactCommand`).
+4. **Logging**: Per-recipient results are written to the `campaign_messages` table for audit and analytics.
 
 ### C. Inbound Interaction Pipeline (Two-Way)
-1. Inbound Event: Carrier routes reply to AWS -> Amazon SNS / Connect.
-2. Processing: Lambda looks up the workspace_id, logs the reply to RDS, and processes STOP flags into the Revocation Chain.
+
+1. **Inbound Event**: Carrier routes reply to AWS → SNS / Connect.
+2. **Processing**: Lambda resolves `workspace_id`, logs the reply to `sms_inbox` / `email_inbox`, and processes STOP flags into the Consent Revocation Chain.
 
 ### D. Telemetry, Billing & Reconciliation Pipeline
-1. Event Generation: SES/SMS/Connect generate downstream status events.
-2. Canonical Event Bus (Fan-Out): Events are published to a central Amazon SNS Topic, acting as the canonical event router.
-3. Cold Storage & Analytics: SNS forwards a copy of every event to Amazon Kinesis Data Firehose, which batches JSON into the S3 Data Lake (queried by Athena).
-4. Idempotent Billing Capture: SNS forwards a second copy to an Amazon SQS Billing Queue. A Lambda monitors this queue, checks the Message_ID against DynamoDB (Idempotency Store), executes financial mutations in the RDS Ledger, and updates suppression lists.
-5. Reconciliation: A nightly cron job sweeps RDS for stale authorizations and executes final account true-ups.
+
+1. **Event Generation**: SES/Pinpoint/Connect emit delivery status events.
+2. **Canonical Event Bus**: Events published to a central SNS Topic (fan-out).
+3. **Cold Storage & Analytics**: SNS → Kinesis Firehose → S3 Data Lake (queried by Athena).
+4. **Idempotent Billing Capture**: SNS → SQS Billing Queue → Lambda checks DynamoDB idempotency store → executes CAPTURE or REFUND in the RDS ledger.
+5. **Nightly Reconciliation**: EventBridge cron sweeps stale authorizations and executes account true-ups.
+
+---
+
+## 5. Guardrails & Compliance
 
 ### A. State Minimization & Guardrails
-- Idempotency: Keep transactional state firmly in PostgreSQL. Use DynamoDB strictly for high-throughput, ephemeral TTL storage. Design all event-driven functions to be fully idempotent so retries never corrupt billing.
-- Multi-Workspace Isolation: A Lambda Authorizer validates the user's JWT token, verifies permission to access the workspace_id header, and securely injects that ID into the downstream execution context to enforce RDS Row-Level Security.
-- Deliverability Guardrails: * Bounce Rates: Trigger a warning to the tenant at 2%, pause at 4%.
-- Complaint Rates: Trigger a warning at 0.08%, pause at 0.4%.
+
+- **Idempotency**: Transactional state in PostgreSQL; DynamoDB strictly for ephemeral TTL storage. All event-driven functions designed to be fully idempotent.
+- **Multi-Workspace Isolation**: Lambda Authorizer validates JWT, verifies workspace access, and injects `workspace_id` into execution context for RDS row-level filtering.
+- **Deliverability Guardrails**:
+  - Bounce rates: warn at 2%, pause at 4%.
+  - Complaint rates: warn at 0.08%, pause at 0.4%.
 
 ### B. Data Retention & Anonymization Matrix (GDPR / TCPA Conflict Resolution)
-A naive "delete everything" button creates massive legal and financial liabilities. When a contact requests their "Right to be Forgotten," the system executes the following retention matrix:
-- Operational Data (RDS Profiles): Hard deleted. Names, custom attributes, and CRM data are permanently purged.
-- Consent & Suppression Ledger (RDS): PII is cryptographically hashed (e.g., SHA-256 of the phone number). The hash is retained on the Suppression List to guarantee the platform never contacts them again, and the original consent evidence is archived in S3 Glacier for 4 years (the standard TCPA statute of limitations).
-- Billing Ledger (RDS): Transactional records (costs/credits) are retained for 7 years to comply with IRS/accounting laws, but are stripped of the recipient's PII.
-- Analytics Event Trails (S3/Athena Data Lake): To avoid complex Data Lake partition rewriting, the platform utilizes PII Tokenization. The S3 Data Lake only stores anonymous internal UUIDs for engagement metrics. By deleting the UUID mapping in RDS (Operational Data), the Data Lake metrics are instantly and irreversibly anonymized.
 
-### Phase 1: Foundation, Workspaces, & The Immutable Ledger (Months 1-2)
+When a contact exercises their "Right to be Forgotten":
+
+| Data Category | Action | Retention |
+|---|---|---|
+| **Operational Data** (RDS Profiles) | Hard deleted | Immediate |
+| **Consent & Suppression Ledger** | PII SHA-256 hashed; hash retained on Suppression List | 4 years (TCPA statute of limitations) |
+| **Billing Ledger** | PII stripped; transaction records retained | 7 years (IRS/accounting) |
+| **Analytics Event Trails** (S3 Data Lake) | PII Tokenized with internal UUIDs; deleting UUID mapping in RDS instantly anonymizes | Indefinite (anonymized) |
+
+---
+
+## 6. Codebase Structure
+
+```
+Marketing-SaaS2/
+├── apps/
+│   ├── frontend/                    # Next.js 16 (Turbopack)
+│   │   └── app/
+│   │       ├── contacts/            # CRM table, ImportWizard
+│   │       ├── email-builder/       # Visual HTML email editor
+│   │       ├── templates/           # Email, SMS, Voice, WebForm template management
+│   │       ├── campaigns/           # Campaign creation & scheduling
+│   │       ├── segments/            # Audience segment management
+│   │       ├── inbox/               # SMS & Email inbox (two-way)
+│   │       ├── analytics/           # Reporting dashboard
+│   │       ├── settings/            # Workspace settings & compliance
+│   │       ├── login/               # Auth flow
+│   │       ├── components/          # Shared UI components (Modal, FormField, etc.)
+│   │       └── lib/
+│   │           ├── store.ts         # Global state management (useStore)
+│   │           └── api.ts           # API client
+│   │
+│   └── infrastructure/              # AWS CDK (TypeScript)
+│       ├── bin/
+│       │   └── infrastructure.ts    # Stack orchestration entry point
+│       ├── lib/
+│       │   ├── database-stack.ts    # RDS, VPC, DynamoDB idempotency table
+│       │   ├── auth-stack.ts        # Cognito User Pool & Identity Pool
+│       │   ├── api-stack.ts         # API Gateway, all CRUD Lambdas, Authorizer
+│       │   ├── email-stack.ts       # SES Identities + EmailDispatchQueue + dispatch Lambda
+│       │   ├── sms-stack.ts         # Pinpoint App + SmsDispatchQueue + dispatch Lambda
+│       │   ├── voice-stack.ts       # Connect Instance + VoiceDispatchQueue + dispatch Lambda
+│       │   ├── billing-stack.ts     # SNS Canonical Bus, SQS Billing Queue, Stripe Webhook
+│       │   ├── contact-ingestion-stack.ts  # S3 Upload Bucket + Step Functions
+│       │   └── analytics-stack.ts   # Kinesis Firehose, Athena, S3 Data Lake
+│       ├── lambda/
+│       │   ├── api/                 # CRUD handlers: contacts, templates, campaigns, etc.
+│       │   ├── dispatch/            # Async dispatch: dispatch-email, dispatch-sms, dispatch-voice
+│       │   ├── authorizer.ts        # JWT validation + workspace RBAC
+│       │   ├── csv-parser.ts        # Step Function chunk processor
+│       │   ├── stripe-webhook.ts    # Stripe event handler → RDS ledger
+│       │   ├── idempotent-billing-capture.ts  # SNS → SQS billing consumer
+│       │   ├── right-to-be-forgotten.ts       # GDPR deletion orchestrator
+│       │   └── timezone-resolution.ts         # Waterfall timezone engine
+│       └── drizzle/
+│           └── schema.ts            # 22-table PostgreSQL schema (Drizzle ORM)
+│
+└── turbo.json                       # Turborepo build orchestration
+```
+
+---
+
+## 7. Database Schema Overview (22 Tables)
+
+| # | Table | Purpose |
+|---|---|---|
+| 1 | `workspaces` | Multi-tenant workspace definitions |
+| 2 | `account_balances` | Double-entry balance cache per workspace |
+| 3 | `transactions_ledger` | Immutable financial log (AUTH / CAPTURE / REFUND / DEPOSIT) |
+| 4 | `users_workspaces` | RBAC: user ↔ workspace ↔ role mapping |
+| 5 | `contacts` | Contact profiles with custom fields (JSONB) |
+| 6 | `segments` | Named audience segments |
+| 7 | `contact_segment` | Many-to-many contact ↔ segment membership |
+| 8 | `email_templates` | HTML email templates with editor JSON |
+| 9 | `sms_templates` | SMS message templates with encoding metadata |
+| 10 | `call_scripts` | SSML voice scripts with Polly voice selection |
+| 11 | `campaigns` | Campaign definitions (channel, template, segment, schedule) |
+| 12 | `campaign_messages` | Per-recipient send results and engagement tracking |
+| 13 | `sms_inbox` | Inbound SMS messages with keyword detection |
+| 14 | `consent_ledger` | Immutable TCPA consent evidence chain |
+| 15 | `suppression_list` | SHA-256 hashed PII for permanent suppression |
+| 16 | `workspace_settings` | Channel config, compliance info, DNC settings |
+| 17 | `segment_folders` | Organizational folders for segments |
+| 18 | `template_folders` | Organizational folders for templates |
+| 19 | `web_forms` | Embeddable lead capture form definitions |
+| 20 | `custom_field_definitions` | Workspace-level custom contact field schemas |
+| 21 | `email_inbox` | Inbound email messages |
+| 22 | `form_submissions` | Web form submission data with contact linking |
+
+---
+
+## 8. CDK Stack Dependency Graph
+
+```mermaid
+graph TD
+    DB[DatabaseStack<br/>RDS · VPC · DynamoDB]
+    AUTH[AuthStack<br/>Cognito]
+    EMAIL[EmailStack<br/>SES · EmailDispatchQueue]
+    SMS[SmsStack<br/>Pinpoint · SmsDispatchQueue]
+    VOICE[VoiceStack<br/>Connect · VoiceDispatchQueue]
+    API[ApiStack<br/>API Gateway · CRUD Lambdas]
+    BILLING[BillingStack<br/>SNS · SQS · Stripe]
+    INGEST[ContactIngestionStack<br/>S3 · Step Functions]
+    ANALYTICS[AnalyticsStack<br/>Kinesis · Athena · S3]
+
+    DB --> EMAIL
+    DB --> SMS
+    DB --> VOICE
+    DB --> API
+    AUTH --> API
+    EMAIL --> API
+    SMS --> API
+    VOICE --> API
+    DB --> BILLING
+    DB --> INGEST
+    DB --> ANALYTICS
+```
+
+---
+
+## 9. Implementation Roadmap
+
+### Phase 1: Foundation, Workspaces & Contact Management ✅
 - Provision VPCs, Cognito, API Gateway, and PostgreSQL (RDS).
-- Build Workspace switching architecture, Lambda Authorizers, and the Support Impersonation Audit Logs.
+- Build Workspace switching architecture, Lambda Authorizers, and Support Impersonation Audit Logs.
 - Implement the Double-Entry Accounting schema in RDS and DynamoDB idempotency tables.
+- **Contact Ingestion Pipeline**: `/contacts/import` bulk endpoint and Step Functions chunking for CSV uploads.
+- **Contact Management UI**: `ImportWizard.tsx` and CRM table view with pagination and filtering.
 
-### Phase 2: Data Pipeline & Email Core (Month 3)
-- Build Step Functions for CSV ingestion and the core Consent Ledger schema.
-- Integrate Amazon SES, leveraging SES Managed Dedicated IPs and VDM. Build feedback loops.
-- Deploy CloudFront for image asset hosting and GrapesJS template builder.
+### Phase 2: Email Engine ✅
+- Integrate Amazon SES with domain auth (DKIM/SPF/DMARC) and VDM.
+- Deploy CloudFront for image asset hosting.
+- **Email Builder UI**: Visual editor at `/email-builder` for HTML templates.
+- **Email Dispatch Pipeline**: `EmailDispatchQueue` (SQS) in `email-stack.ts` → `dispatch-email.ts` Lambda parses segment contacts, replaces merge tags, and sends via SES `SendEmailCommand`. Campaign API pushes new email campaigns to the queue.
 
-### Phase 3: SMS, Telephony Compliance, & Idempotent Billing (Month 4)
-- Integrate AWS End User Messaging for phone numbers and 10DLC.
-- Build the Waterfall Timezone Resolution Engine (with third-party API integration) and FTC SAN 31-day scrubbing logic.
-- Implement the SNS -> SQS fan-out architecture for asynchronous billing capture.
+### Phase 3: SMS Engine ✅
+- Integrate AWS End User Messaging for phone numbers and 10DLC registration.
+- Build the Waterfall Timezone Resolution Engine and FTC SAN 31-day scrubbing logic.
+- Implement the SNS → SQS fan-out architecture for asynchronous billing capture.
+- **SMS Template UI**: Composer integrated into `templates/page.tsx` with GSM-7/Unicode segment calculation.
+- **SMS Dispatch Pipeline**: `SmsDispatchQueue` (SQS) in `sms-stack.ts` → `dispatch-sms.ts` Lambda sends via Pinpoint `SendMessagesCommand`.
 
-### Phase 4: Voice & Amazon Connect (Month 5)
-- Provision the pooled Amazon Connect instance and configure dynamic Contact Flows for IVR.
-- Explicitly share/associate End User Messaging numbers to Connect.
+### Phase 4: Voice Engine ✅
+- Provision the pooled Amazon Connect instance with dynamic Contact Flows for IVR.
+- Associate End User Messaging numbers to Connect for unified Caller ID.
 - Integrate Connect Outbound Campaigns for dialing and AMD.
-- Implement STIR/SHAKEN and third-party analytics registry for spam label mitigation.
+- **Voice Script UI**: SSML editor modal in `templates/page.tsx` with AWS Polly voice selection (Joanna, Matthew, Salli, Joey).
+- **Voice Dispatch Pipeline**: `VoiceDispatchQueue` (SQS) in `voice-stack.ts` → `dispatch-voice.ts` Lambda calls Connect `StartOutboundVoiceContactCommand`.
 
-### Phase 5: Analytics, Compliance Deletion & Beta Launch (Month 6)
-- Complete Athena/QuickSight integration utilizing PII Tokenization and workspace_id filtering.
+### Phase 5: Analytics, Compliance & Beta Launch
+- Complete Athena/QuickSight integration with PII Tokenization and `workspace_id` filtering.
 - Build the automated "Right to be Forgotten" orchestrator based on the Data Retention Matrix.
+- Implement STIR/SHAKEN registration and third-party analytics registry for spam label mitigation.
 - Security audits, WAF tuning, and private beta rollout.
 
+---
+
+*Last updated: April 29, 2026*
