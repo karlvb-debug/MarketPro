@@ -7,7 +7,7 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { eq, and } from 'drizzle-orm';
-import { getDb, respond, getWorkspaceId, getUserId } from '../lib/db';
+import { getDb, respond, getWorkspaceId, getUserId, requireRole } from '../lib/db';
 import { segments } from '../../drizzle/schema';
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
@@ -33,8 +33,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return respond(200, { data: rows });
     }
 
-    // POST /segments
+    // POST /segments — requires editor
     if (method === 'POST') {
+      const writeDenied = requireRole(event, 'editor');
+      if (writeDenied) return writeDenied;
       const body = JSON.parse(event.body || '{}');
       const [row] = await db.insert(segments).values({
         workspaceId,
@@ -46,8 +48,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return respond(201, row);
     }
 
-    // PUT /segments/{id}
+    // PUT /segments/{id} — requires editor
     if (method === 'PUT' && pathId) {
+      const writeDenied = requireRole(event, 'editor');
+      if (writeDenied) return writeDenied;
       const body = JSON.parse(event.body || '{}');
       const updates: Record<string, any> = {};
       if (body.name !== undefined) updates.name = body.name;
@@ -61,8 +65,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return respond(200, { message: 'Updated' });
     }
 
-    // DELETE /segments/{id}
+    // DELETE /segments/{id} — requires admin
     if (method === 'DELETE' && pathId) {
+      const deleteDenied = requireRole(event, 'admin');
+      if (deleteDenied) return deleteDenied;
       await db.delete(segments).where(
         and(eq(segments.segmentId, pathId), eq(segments.workspaceId, workspaceId))
       );

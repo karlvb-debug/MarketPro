@@ -7,7 +7,7 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { eq } from 'drizzle-orm';
-import { getDb, respond, getWorkspaceId, getUserId } from '../lib/db';
+import { getDb, respond, getWorkspaceId, getUserId, requireRole } from '../lib/db';
 import { campaigns } from '../../drizzle/schema';
 
 const sqs = new SQSClient({});
@@ -27,6 +27,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
   const pathId = event.pathParameters?.id;
 
   try {
+    // RBAC: All campaign routes require at least viewer
+    const viewDenied = requireRole(event, 'viewer');
+    if (viewDenied) return viewDenied;
+
     // GET /campaigns
     if (method === 'GET' && !pathId) {
       const rows = await db
@@ -38,8 +42,11 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return respond(200, { data: rows });
     }
 
-    // POST /campaigns
+    // POST /campaigns — requires editor role
     if (method === 'POST') {
+      const writeDenied = requireRole(event, 'editor');
+      if (writeDenied) return writeDenied;
+
       const body = JSON.parse(event.body || '{}');
       const [row] = await db.insert(campaigns).values({
         workspaceId,

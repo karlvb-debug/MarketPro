@@ -75,7 +75,11 @@ export const handler = async (event: APIGatewayRequestAuthorizerEvent): Promise<
     const payload = await verifier.verify(token!);
     const userId = payload.sub;
 
-    // 4. Extract the workspace ID from the request header
+    // 4. Check for Super Admin status via Cognito Groups
+    const cognitoGroups: string[] = (payload as any)['cognito:groups'] || [];
+    const isSuperAdmin = cognitoGroups.includes('SuperAdmins');
+
+    // 5. Extract the workspace ID from the request header
     const workspaceId = event.headers?.['X-Workspace-Id'] || event.headers?.['x-workspace-id'];
 
     // Build the wildcard ARN for the cached policy
@@ -83,17 +87,27 @@ export const handler = async (event: APIGatewayRequestAuthorizerEvent): Promise<
     const apiGatewayArnParts = arnParts[5]!.split('/');
     const wildcardArn = arnParts.slice(0, 5).join(':') + ':' + apiGatewayArnParts[0] + '/' + apiGatewayArnParts[1] + '/*';
 
-    // 5. If no workspace header, allow through (some endpoints like /workspaces don't need it)
-    //    The individual Lambda will validate workspace access as needed.
+    // 6. If no workspace header, allow through (some endpoints like /workspaces don't need it)
     if (!workspaceId) {
-      console.log(`User ${userId} authenticated (no workspace context).`);
+      console.log(`User ${userId} authenticated (no workspace context). SuperAdmin: ${isSuperAdmin}`);
       return generatePolicy(userId!, 'Allow', wildcardArn, {
-        tenant_role: 'none',
+        tenant_role: isSuperAdmin ? 'super_admin' : 'none',
         workspace_id: '',
+        is_super_admin: isSuperAdmin ? 'true' : 'false',
       });
     }
 
-    // 6. RBAC: Verify the user has a role in the requested workspace
+    // 7. Super Admins bypass workspace membership — they can access any workspace
+    if (isSuperAdmin) {
+      console.log(`SUPER ADMIN: User ${userId} accessing workspace ${workspaceId} (impersonation mode)`);
+      return generatePolicy(userId!, 'Allow', wildcardArn, {
+        tenant_role: 'super_admin',
+        workspace_id: workspaceId,
+        is_super_admin: 'true',
+      });
+    }
+
+    // 8. Standard RBAC: Verify the user has a role in the requested workspace
     const role = await resolveWorkspaceRole(userId!, workspaceId);
 
     if (!role) {
@@ -101,6 +115,7 @@ export const handler = async (event: APIGatewayRequestAuthorizerEvent): Promise<
       return generatePolicy(userId!, 'Deny', wildcardArn, {
         tenant_role: 'denied',
         workspace_id: workspaceId,
+        is_super_admin: 'false',
       });
     }
 
@@ -109,6 +124,7 @@ export const handler = async (event: APIGatewayRequestAuthorizerEvent): Promise<
     return generatePolicy(userId!, 'Allow', wildcardArn, {
       tenant_role: role,
       workspace_id: workspaceId,
+      is_super_admin: 'false',
     });
 
   } catch (error) {

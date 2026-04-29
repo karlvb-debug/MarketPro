@@ -8,7 +8,7 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { eq, and } from 'drizzle-orm';
-import { getDb, respond, getUserId } from '../lib/db';
+import { getDb, respond, getUserId, requireRole } from '../lib/db';
 import { workspaces, usersWorkspaces } from '../../drizzle/schema';
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
@@ -59,15 +59,19 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return respond(201, { workspaceId: newWs.workspaceId, name: newWs.name });
     }
 
-    // PUT /workspaces/{id} — rename
+    // PUT /workspaces/{id} — rename (requires admin)
     if (method === 'PUT' && pathId) {
+      const writeDenied = requireRole(event, 'admin');
+      if (writeDenied) return writeDenied;
       const body = JSON.parse(event.body || '{}');
       await db.update(workspaces).set({ name: body.name }).where(eq(workspaces.workspaceId, pathId));
       return respond(200, { message: 'Updated' });
     }
 
-    // DELETE /workspaces/{id}
+    // DELETE /workspaces/{id} — requires owner
     if (method === 'DELETE' && pathId) {
+      const deleteDenied = requireRole(event, 'owner');
+      if (deleteDenied) return deleteDenied;
       await db.delete(workspaces).where(eq(workspaces.workspaceId, pathId));
       return respond(204, null);
     }

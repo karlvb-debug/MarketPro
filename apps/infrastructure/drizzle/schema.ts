@@ -486,3 +486,26 @@ export const formSubmissions = pgTable('form_submissions', {
   contactIdx: index('form_submissions_contact_idx').on(table.contactId),
 }));
 
+// ============================================
+// ADMIN AUDIT LOG — Super Admin Impersonation Trail
+// ============================================
+
+export const adminAuditLog = pgTable('admin_audit_log', {
+  logId: uuid('log_id').defaultRandom().primaryKey(),
+  adminUserId: varchar('admin_user_id', { length: 255 }).notNull(),  // Cognito sub of the Super Admin
+  impersonatedWorkspaceId: uuid('impersonated_workspace_id')
+    .notNull()
+    .references(() => workspaces.workspaceId, { onDelete: 'cascade' }),
+  action: varchar('action', { length: 50 }).notNull(),               // e.g. 'READ', 'WRITE', 'DELETE'
+  resource: varchar('resource', { length: 255 }).notNull(),          // e.g. 'contacts', 'campaigns', 'settings'
+  resourceId: varchar('resource_id', { length: 255 }),               // ID of the specific record acted on
+  method: varchar('method', { length: 10 }).notNull(),               // HTTP method: GET, POST, PUT, DELETE
+  path: varchar('path', { length: 500 }),                            // Full API path
+  ipAddress: varchar('ip_address', { length: 45 }),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+  adminIdx: index('admin_audit_admin_idx').on(table.adminUserId),
+  workspaceIdx: index('admin_audit_workspace_idx').on(table.impersonatedWorkspaceId),
+  createdAtIdx: index('admin_audit_created_at_idx').on(table.createdAt),
+}));

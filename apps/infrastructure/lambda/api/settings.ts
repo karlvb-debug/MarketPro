@@ -6,7 +6,7 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { eq } from 'drizzle-orm';
-import { getDb, respond, getWorkspaceId, getUserId } from '../lib/db';
+import { getDb, respond, getWorkspaceId, getUserId, requireRole } from '../lib/db';
 import { workspaceSettings } from '../../drizzle/schema';
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
@@ -30,8 +30,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return respond(200, row || {});
     }
 
-    // PUT /settings — upsert
+    // PUT /settings — upsert (requires admin role)
     if (method === 'PUT') {
+      const writeDenied = requireRole(event, 'admin');
+      if (writeDenied) return writeDenied;
       const body = JSON.parse(event.body || '{}');
 
       // Try update first

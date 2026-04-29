@@ -80,3 +80,66 @@ export function getWorkspaceId(event: any): string | null {
 export function getUserId(event: any): string | null {
   return event.requestContext?.authorizer?.principalId || null;
 }
+
+// ============================================
+// RBAC Helpers
+// ============================================
+
+/** Permission hierarchy — higher index = more permissions */
+const ROLE_HIERARCHY = ['viewer', 'editor', 'admin', 'owner', 'super_admin'] as const;
+type Role = typeof ROLE_HIERARCHY[number];
+
+/**
+ * Extract the tenant role from the authorizer context.
+ * Returns the role string injected by the authorizer Lambda.
+ */
+export function getTenantRole(event: any): string {
+  return event.requestContext?.authorizer?.tenant_role || 'none';
+}
+
+/**
+ * Check if the caller is a Super Admin (global platform access).
+ */
+export function isSuperAdmin(event: any): boolean {
+  return getTenantRole(event) === 'super_admin';
+}
+
+/**
+ * Check if the caller's role meets the minimum required role.
+ * Returns true if authorized, false if denied.
+ *
+ * Hierarchy: viewer < editor < admin < owner < super_admin
+ */
+export function hasMinRole(event: any, minRole: Role): boolean {
+  const callerRole = getTenantRole(event) as Role;
+  const callerLevel = ROLE_HIERARCHY.indexOf(callerRole);
+  const requiredLevel = ROLE_HIERARCHY.indexOf(minRole);
+  return callerLevel >= requiredLevel;
+}
+
+/**
+ * Guard that returns a 403 response if the caller lacks the minimum role.
+ * Usage: const denied = requireRole(event, 'editor'); if (denied) return denied;
+ */
+export function requireRole(event: any, minRole: Role) {
+  if (!hasMinRole(event, minRole)) {
+    return respond(403, {
+      message: `Forbidden: requires '${minRole}' role or higher`,
+      yourRole: getTenantRole(event),
+    });
+  }
+  return null; // Authorized
+}
+
+/**
+ * Map HTTP methods to action categories for audit logging.
+ */
+export function methodToAction(method: string): string {
+  switch (method.toUpperCase()) {
+    case 'GET': return 'READ';
+    case 'POST': return 'WRITE';
+    case 'PUT': case 'PATCH': return 'WRITE';
+    case 'DELETE': return 'DELETE';
+    default: return 'READ';
+  }
+}

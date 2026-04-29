@@ -9,7 +9,7 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { eq, and } from 'drizzle-orm';
-import { getDb, respond, getWorkspaceId, getUserId } from '../lib/db';
+import { getDb, respond, getWorkspaceId, getUserId, requireRole } from '../lib/db';
 import { emailTemplates, smsTemplates, callScripts } from '../../drizzle/schema';
 
 // Map URL type to Drizzle table + ID column name
@@ -70,8 +70,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return respond(200, row);
     }
 
-    // POST /templates/{type} — create
+    // POST /templates/{type} — create (requires editor)
     if (method === 'POST') {
+      const writeDenied = requireRole(event, 'editor');
+      if (writeDenied) return writeDenied;
       const body = JSON.parse(event.body || '{}');
       let row: any;
 
@@ -114,8 +116,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return respond(201, row);
     }
 
-    // PUT /templates/{type}/{id} — update
+    // PUT /templates/{type}/{id} — update (requires editor)
     if (method === 'PUT' && templateId) {
+      const writeDenied = requireRole(event, 'editor');
+      if (writeDenied) return writeDenied;
       const body = JSON.parse(event.body || '{}');
       const updates: Record<string, any> = { updatedAt: new Date() };
 
@@ -150,8 +154,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return respond(200, { message: 'Updated' });
     }
 
-    // DELETE /templates/{type}/{id}
+    // DELETE /templates/{type}/{id} — requires admin
     if (method === 'DELETE' && templateId) {
+      const deleteDenied = requireRole(event, 'admin');
+      if (deleteDenied) return deleteDenied;
       await db.delete(table).where(
         and(eq(idCol, templateId), eq((table as any).workspaceId, workspaceId))
       );

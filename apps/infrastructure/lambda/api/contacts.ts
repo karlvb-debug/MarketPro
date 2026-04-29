@@ -8,8 +8,8 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { eq, and, or, ilike, sql, inArray } from 'drizzle-orm';
-import { getDb, respond, getWorkspaceId, getUserId } from '../lib/db';
-import { contacts } from '../../drizzle/schema';
+import { getDb, respond, getWorkspaceId, getUserId, requireRole, isSuperAdmin, methodToAction } from '../lib/db';
+import { contacts, adminAuditLog } from '../../drizzle/schema';
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   const method = event.httpMethod;
@@ -23,6 +23,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
   const pathId = event.pathParameters?.id;
 
   try {
+    // RBAC: All methods require at least viewer
+    const viewDenied = requireRole(event, 'viewer');
+    if (viewDenied) return viewDenied;
+
     // GET /contacts
     if (method === 'GET' && !pathId) {
       const params = event.queryStringParameters || {};
@@ -90,8 +94,11 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     // POST /contacts/import — bulk upsert (up to 1,000 per request)
+    // Requires editor role or higher
     // Two-pass strategy to handle both email-based and phone-only contacts
     if (method === 'POST' && event.path?.endsWith('/import')) {
+      const writeDenied = requireRole(event, 'editor');
+      if (writeDenied) return writeDenied;
       const body = JSON.parse(event.body || '{}');
       const rawRows: unknown[] = Array.isArray(body.contacts) ? body.contacts.slice(0, 1000) : [];
       if (rawRows.length === 0) return respond(400, { message: 'No contacts provided' });
@@ -165,7 +172,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     // POST /contacts — single upsert
+    // Requires editor role or higher
     if (method === 'POST') {
+      const writeDenied = requireRole(event, 'editor');
+      if (writeDenied) return writeDenied;
       const body = JSON.parse(event.body || '{}');
 
       const values = {
@@ -206,7 +216,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     // PUT /contacts/{id}
+    // Requires editor role or higher
     if (method === 'PUT' && pathId) {
+      const writeDenied = requireRole(event, 'editor');
+      if (writeDenied) return writeDenied;
       const body = JSON.parse(event.body || '{}');
       const updates: Record<string, any> = { updatedAt: new Date() };
 
@@ -227,7 +240,25 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     // DELETE /contacts/{id} — single delete
+    // Requires admin role or higher
     if (method === 'DELETE' && pathId) {
+      const deleteDenied = requireRole(event, 'admin');
+      if (deleteDenied) return deleteDenied;
+
+      // Log Super Admin impersonation
+      if (isSuperAdmin(event)) {
+        await db.insert(adminAuditLog).values({
+          adminUserId: userId!,
+          impersonatedWorkspaceId: workspaceId,
+          action: 'DELETE',
+          resource: 'contacts',
+          resourceId: pathId,
+          method: 'DELETE',
+          path: event.path || '',
+          ipAddress: event.requestContext?.identity?.sourceIp || null,
+          userAgent: event.headers?.['User-Agent'] || event.headers?.['user-agent'] || null,
+        });
+      }
       await db.delete(contacts).where(
         and(eq(contacts.contactId, pathId), eq(contacts.workspaceId, workspaceId))
       );
@@ -235,7 +266,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     // DELETE /contacts (no id) — bulk delete, body: { ids: string[] }
+    // Requires admin role or higher
     if (method === 'DELETE' && !pathId) {
+      const deleteDenied = requireRole(event, 'admin');
+      if (deleteDenied) return deleteDenied;
       const body = JSON.parse(event.body || '{}');
       const ids: string[] = Array.isArray(body.ids) ? body.ids.slice(0, 500) : [];
       if (ids.length === 0) return respond(400, { message: 'No ids provided' });
