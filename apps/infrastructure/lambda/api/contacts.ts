@@ -133,13 +133,13 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
           .onConflictDoUpdate({
             target: [contacts.workspaceId, contacts.email],
             set: {
-              firstName: sql`COALESCE(EXCLUDED.first_name, contacts.first_name)`,
-              lastName: sql`COALESCE(EXCLUDED.last_name, contacts.last_name)`,
-              phone: sql`COALESCE(EXCLUDED.phone, contacts.phone)`,
-              company: sql`COALESCE(EXCLUDED.company, contacts.company)`,
-              timezone: sql`COALESCE(EXCLUDED.timezone, contacts.timezone)`,
-              state: sql`COALESCE(EXCLUDED.state, contacts.state)`,
-              consentSource: sql`COALESCE(EXCLUDED.consent_source, contacts.consent_source)`,
+              firstName: sql`COALESCE(EXCLUDED."first_name", ${contacts.firstName})`,
+              lastName: sql`COALESCE(EXCLUDED."last_name", ${contacts.lastName})`,
+              phone: sql`COALESCE(EXCLUDED."phone", ${contacts.phone})`,
+              company: sql`COALESCE(EXCLUDED."company", ${contacts.company})`,
+              timezone: sql`COALESCE(EXCLUDED."timezone", ${contacts.timezone})`,
+              state: sql`COALESCE(EXCLUDED."state", ${contacts.state})`,
+              consentSource: sql`COALESCE(EXCLUDED."consent_source", ${contacts.consentSource})`,
               updatedAt: new Date(),
             },
           })
@@ -155,12 +155,12 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
           .onConflictDoUpdate({
             target: [contacts.workspaceId, contacts.phone],
             set: {
-              firstName: sql`COALESCE(EXCLUDED.first_name, contacts.first_name)`,
-              lastName: sql`COALESCE(EXCLUDED.last_name, contacts.last_name)`,
-              company: sql`COALESCE(EXCLUDED.company, contacts.company)`,
-              timezone: sql`COALESCE(EXCLUDED.timezone, contacts.timezone)`,
-              state: sql`COALESCE(EXCLUDED.state, contacts.state)`,
-              consentSource: sql`COALESCE(EXCLUDED.consent_source, contacts.consent_source)`,
+              firstName: sql`COALESCE(EXCLUDED."first_name", ${contacts.firstName})`,
+              lastName: sql`COALESCE(EXCLUDED."last_name", ${contacts.lastName})`,
+              company: sql`COALESCE(EXCLUDED."company", ${contacts.company})`,
+              timezone: sql`COALESCE(EXCLUDED."timezone", ${contacts.timezone})`,
+              state: sql`COALESCE(EXCLUDED."state", ${contacts.state})`,
+              consentSource: sql`COALESCE(EXCLUDED."consent_source", ${contacts.consentSource})`,
               updatedAt: new Date(),
             },
           })

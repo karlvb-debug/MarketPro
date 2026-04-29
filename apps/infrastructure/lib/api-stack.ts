@@ -113,6 +113,8 @@ export class ApiStack extends cdk.Stack {
       ...commonLambdaProps,
       entry: path.join(__dirname, '../lambda/api/contacts.ts'),
       handler: 'handler',
+      timeout: cdk.Duration.seconds(29), // Higher timeout for bulk import (up to 1,000 rows)
+      memorySize: 512,                   // More memory for large INSERT batches
     });
     props.dbSecret.grantRead(contactsLambda);
 
