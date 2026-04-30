@@ -65,16 +65,22 @@ async function apiFetch<T>(
   };
 
   // Attach auth token
+  let hadToken = false;
   if (getAuthToken) {
     const token = await getAuthToken();
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
+      hadToken = true;
     }
   }
 
   // Attach workspace isolation header
-  if (currentWorkspaceId) {
+  // API Gateway Request Authorizer requires X-Workspace-Id as an Identity Source to cache properly.
+  // If we don't have a workspace yet, or we're in offline mode ('ws_acme'), send the global UUID.
+  if (currentWorkspaceId && currentWorkspaceId !== 'ws_acme') {
     headers['X-Workspace-Id'] = currentWorkspaceId;
+  } else {
+    headers['X-Workspace-Id'] = '00000000-0000-0000-0000-000000000000';
   }
 
   const url = `${config.apiUrl}${path}`;
@@ -87,12 +93,12 @@ async function apiFetch<T>(
         body: body ? JSON.stringify(body) : undefined,
       });
 
-      // Handle auth failures — auto-redirect to login
+      // Handle auth failures — only redirect to login if we actually had a token
+      // (expired session). If no token was present, just throw — the user is
+      // on the login page or unauthenticated.
       if (res.status === 401) {
-        if (onAuthExpired) {
+        if (hadToken && onAuthExpired) {
           onAuthExpired();
-        } else if (typeof window !== 'undefined') {
-          window.location.href = '/login';
         }
         throw { status: 401, message: 'Session expired. Please sign in again.' } as ApiError;
       }
@@ -190,6 +196,7 @@ export const api = {
     delete: (id: string) => apiClient.delete(`/contacts/${id}`),
     bulkDelete: (ids: string[]) => apiClient.delete<{ deleted: number }>('/contacts', { ids }),
     import: (contacts: unknown[]) => apiClient.post<{ added: number; updated: number; skipped: number }>('/contacts/import', { contacts }),
+    getImportUrl: () => apiClient.get<{ url: string; key: string }>('/contacts/import-url'),
   },
 
   // Segments

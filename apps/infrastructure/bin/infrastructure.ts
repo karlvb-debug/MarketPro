@@ -54,7 +54,18 @@ const voiceStack = new VoiceStack(app, 'MarketingSaaSVoiceStack', {
 });
 voiceStack.addDependency(databaseStack);
 
-// 6. Provision the API Stack (API Gateway, Authorizers)
+// 6. Provision the Contact Ingestion Stack (S3, Step Functions)
+const contactIngestionStack = new ContactIngestionStack(app, 'MarketingSaaSContactIngestionStack', {
+  env,
+  vpc: databaseStack.vpc,
+  lambdaSecurityGroup: databaseStack.lambdaSecurityGroup,
+  database: databaseStack.database,
+  dbSecret: databaseStack.dbSecret,
+});
+
+contactIngestionStack.addDependency(databaseStack);
+
+// 7. Provision the API Stack (API Gateway, Authorizers)
 // Now receives all cross-stack dependencies it needs to function
 const apiStack = new ApiStack(app, 'MarketingSaaSApiStack', {
   env,
@@ -67,6 +78,7 @@ const apiStack = new ApiStack(app, 'MarketingSaaSApiStack', {
   emailDispatchQueue: emailStack.emailDispatchQueue,
   smsDispatchQueue: smsStack.smsDispatchQueue,
   voiceDispatchQueue: voiceStack.voiceDispatchQueue,
+  uploadBucket: contactIngestionStack.uploadBucket,
   // frontendUrl: 'https://app.yourdomain.com', // Set this for production
 });
 
@@ -75,8 +87,9 @@ apiStack.addDependency(databaseStack);
 apiStack.addDependency(emailStack);
 apiStack.addDependency(smsStack);
 apiStack.addDependency(voiceStack);
+apiStack.addDependency(contactIngestionStack);
 
-// 7. Provision the Billing Stack (SNS Canonical, SQS, Stripe Webhooks, Idempotency)
+// 8. Provision the Billing Stack (SNS Canonical, SQS, Stripe Webhooks, Idempotency)
 const billingStack = new BillingStack(app, 'MarketingSaaSBillingStack', {
   env,
   vpc: databaseStack.vpc,
@@ -87,17 +100,6 @@ const billingStack = new BillingStack(app, 'MarketingSaaSBillingStack', {
 });
 
 billingStack.addDependency(databaseStack);
-
-// 8. Provision the Contact Ingestion Stack (S3, Step Functions)
-const contactIngestionStack = new ContactIngestionStack(app, 'MarketingSaaSContactIngestionStack', {
-  env,
-  vpc: databaseStack.vpc,
-  lambdaSecurityGroup: databaseStack.lambdaSecurityGroup,
-  database: databaseStack.database,
-  dbSecret: databaseStack.dbSecret,
-});
-
-contactIngestionStack.addDependency(databaseStack);
 
 // 9. Provision the Analytics Stack (Athena Data Lake & Right to be Forgotten)
 const analyticsStack = new AnalyticsStack(app, 'MarketingSaaSAnalyticsStack', {

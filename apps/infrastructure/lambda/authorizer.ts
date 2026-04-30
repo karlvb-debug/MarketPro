@@ -54,11 +54,16 @@ async function getPool(): Promise<Pool> {
  */
 async function resolveWorkspaceRole(userId: string, workspaceId: string): Promise<string | null> {
   const client = await getPool();
-  const result = await client.query(
-    'SELECT role FROM users_workspaces WHERE user_id = $1 AND workspace_id = $2 LIMIT 1',
-    [userId, workspaceId]
-  );
-  return result.rows.length > 0 ? result.rows[0].role : null;
+  try {
+    const result = await client.query(
+      'SELECT role FROM users_workspaces WHERE user_id = $1 AND workspace_id = $2 LIMIT 1',
+      [userId, workspaceId]
+    );
+    return result.rows.length > 0 ? result.rows[0].role : null;
+  } catch (err) {
+    console.warn(`Error resolving workspace role for user ${userId} and workspace ${workspaceId}:`, err);
+    return null; // Graceful deny on invalid UUIDs etc
+  }
 }
 
 export const handler = async (event: APIGatewayRequestAuthorizerEvent): Promise<APIGatewayAuthorizerResult> => {
@@ -87,9 +92,10 @@ export const handler = async (event: APIGatewayRequestAuthorizerEvent): Promise<
     const apiGatewayArnParts = arnParts[5]!.split('/');
     const wildcardArn = arnParts.slice(0, 5).join(':') + ':' + apiGatewayArnParts[0] + '/' + apiGatewayArnParts[1] + '/*';
 
-    // 6. If no workspace header, allow through (some endpoints like /workspaces don't need it)
-    if (!workspaceId) {
-      console.log(`User ${userId} authenticated (no workspace context). SuperAdmin: ${isSuperAdmin}`);
+    // 6. If no workspace header (or the special global UUID), allow through (for /workspaces etc)
+    const GLOBAL_WORKSPACE_ID = '00000000-0000-0000-0000-000000000000';
+    if (!workspaceId || workspaceId === GLOBAL_WORKSPACE_ID) {
+      console.log(`User ${userId} authenticated (global context). SuperAdmin: ${isSuperAdmin}`);
       return generatePolicy(userId!, 'Allow', wildcardArn, {
         tenant_role: isSuperAdmin ? 'super_admin' : 'none',
         workspace_id: '',

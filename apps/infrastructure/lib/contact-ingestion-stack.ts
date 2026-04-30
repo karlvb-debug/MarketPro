@@ -35,6 +35,13 @@ export class ContactIngestionStack extends cdk.Stack {
           expiration: cdk.Duration.days(3),
         },
       ],
+      cors: [
+        {
+          allowedMethods: [s3.HttpMethods.PUT],
+          allowedOrigins: ['*'],
+          allowedHeaders: ['*'],
+        },
+      ],
       removalPolicy: cdk.RemovalPolicy.DESTROY, // For dev
     });
 
@@ -71,16 +78,11 @@ export class ContactIngestionStack extends cdk.Stack {
       error: 'IngestionError',
     });
 
-    // Simple Map/Loop scaffolding for chunks, with error handling
-    const processLoop = new sfn.Map(this, 'Process CSV Chunks in Parallel', {
-      maxConcurrency: 10,
-    }).iterator(parseChunkTask);
-
     // Add error catch to route failures to the fail state
-    processLoop.addCatch(failState);
+    parseChunkTask.addCatch(failState);
 
     // Tie it together
-    const definition = processLoop.next(successState);
+    const definition = parseChunkTask.next(successState);
 
     // 4. Create the Step Function State Machine
     this.ingestionStateMachine = new sfn.StateMachine(this, 'ContactIngestionOrchestrator', {

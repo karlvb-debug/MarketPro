@@ -8,6 +8,7 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as path from 'path';
 
 export interface ApiStackProps extends cdk.StackProps {
@@ -20,6 +21,7 @@ export interface ApiStackProps extends cdk.StackProps {
   emailDispatchQueue?: sqs.IQueue;
   smsDispatchQueue?: sqs.IQueue;
   voiceDispatchQueue?: sqs.IQueue;
+  uploadBucket?: s3.IBucket;
   frontendUrl?: string;
 }
 
@@ -115,8 +117,15 @@ export class ApiStack extends cdk.Stack {
       handler: 'handler',
       timeout: cdk.Duration.seconds(29), // Higher timeout for bulk import (up to 1,000 rows)
       memorySize: 512,                   // More memory for large INSERT batches
+      environment: {
+        ...commonLambdaProps.environment,
+        UPLOAD_BUCKET: props.uploadBucket?.bucketName || '',
+      },
     });
     props.dbSecret.grantRead(contactsLambda);
+    if (props.uploadBucket) {
+      props.uploadBucket.grantPut(contactsLambda);
+    }
 
     const segmentsLambda = new lambdaNodejs.NodejsFunction(this, 'SegmentsFunction', {
       ...commonLambdaProps,
@@ -242,6 +251,10 @@ export class ApiStack extends cdk.Stack {
     // /contacts/import — bulk upsert endpoint
     const contactsImportResource = contactsResource.addResource('import');
     contactsImportResource.addMethod('POST', contactsIntegration, securedMethodOptions);
+
+    // /contacts/import-url — generate presigned s3 upload URL
+    const contactsImportUrlResource = contactsResource.addResource('import-url');
+    contactsImportUrlResource.addMethod('GET', contactsIntegration, securedMethodOptions);
 
     const contactIdResource = contactsResource.addResource('{id}');
     contactIdResource.addMethod('GET', contactsIntegration, securedMethodOptions);

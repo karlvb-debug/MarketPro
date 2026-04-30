@@ -8,8 +8,12 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { eq, and, or, ilike, sql, inArray } from 'drizzle-orm';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getDb, respond, getWorkspaceId, getUserId, requireRole, isSuperAdmin, methodToAction } from '../lib/db';
 import { contacts, adminAuditLog } from '../../drizzle/schema';
+
+const s3Client = new S3Client({});
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   const method = event.httpMethod;
@@ -26,6 +30,30 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     // RBAC: All methods require at least viewer
     const viewDenied = requireRole(event, 'viewer');
     if (viewDenied) return viewDenied;
+
+    // GET /contacts/import-url — generate presigned s3 upload URL
+    if (method === 'GET' && event.path?.endsWith('/import-url')) {
+      const writeDenied = requireRole(event, 'editor');
+      if (writeDenied) return writeDenied;
+
+      const uploadBucket = process.env.UPLOAD_BUCKET;
+      if (!uploadBucket) return respond(500, { message: 'Upload bucket not configured' });
+
+      // Create a unique key for the import file, ensuring it's isolated by workspace
+      const fileId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      const key = `${workspaceId}/import-${fileId}.csv`;
+
+      const command = new PutObjectCommand({
+        Bucket: uploadBucket,
+        Key: key,
+        ContentType: 'text/csv',
+      });
+
+      // URL valid for 15 minutes
+      const presignedUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 });
+
+      return respond(200, { url: presignedUrl, key });
+    }
 
     // GET /contacts
     if (method === 'GET' && !pathId) {

@@ -23,20 +23,22 @@ export class EmailStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: EmailStackProps) {
     super(scope, id, props);
 
-    // Provide a placeholder Identity that would be dynamically provisioned per workspace
-    // in a real scenario, or defined for the core application here.
-    const defaultIdentity = ses.Identity.domain('mail.yourdomain.com');
+    // SES Email Identity — only created when a real domain is configured.
+    // Set SES_DOMAIN env var (e.g., 'yourdomain.com') before deploying.
+    const sesDomain = process.env.SES_DOMAIN;
 
-    new ses.EmailIdentity(this, 'MarketingSaaSEmailIdentity', {
-      identity: defaultIdentity,
-      mailFromDomain: 'bounce.yourdomain.com',
-    });
+    if (sesDomain) {
+      new ses.EmailIdentity(this, 'MarketingSaaSEmailIdentity', {
+        identity: ses.Identity.domain(sesDomain),
+        mailFromDomain: `bounce.${sesDomain}`,
+      });
 
-    // Dedicated IP Pool for warming up IPs automatically via SES Managed IPs
-    new ses.DedicatedIpPool(this, 'MarketingSaaSIpPool', {
-      dedicatedIpPoolName: 'marketing-saas-production-pool',
-      scalingMode: ses.ScalingMode.MANAGED,
-    });
+      // Dedicated IP Pool for warming up IPs automatically via SES Managed IPs
+      new ses.DedicatedIpPool(this, 'MarketingSaaSIpPool', {
+        dedicatedIpPoolName: 'marketing-saas-production-pool',
+        scalingMode: ses.ScalingMode.MANAGED,
+      });
+    }
 
     // 1. Create SQS Queue for email dispatch
     this.emailDispatchQueue = new sqs.Queue(this, 'EmailDispatchQueue', {

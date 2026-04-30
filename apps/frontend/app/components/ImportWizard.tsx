@@ -15,6 +15,7 @@ import {
   isBlankRow,
 } from '../lib/contact-utils';
 import type { Contact } from '../lib/store';
+import { api } from '../lib/api-client';
 
 // ============================================
 // Types
@@ -50,7 +51,8 @@ export default function ImportWizard({
 }: ImportWizardProps) {
   // Step state
   const [step, setStep] = useState<ImportStep>('upload');
-  const [result, setResult] = useState<{ added: number; updated: number; skipped: number; blankSkipped: number; noIdSkipped: number } | null>(null);
+  const [result, setResult] = useState<{ added: number; updated: number; skipped: number; blankSkipped: number; noIdSkipped: number; background?: boolean } | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   // Upload state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -83,6 +85,7 @@ export default function ImportWizard({
     setBlankRowCount(0);
     setIsDragging(false);
     setConsentSource('');
+    setIsUploading(false);
     // Reset file input
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
@@ -232,7 +235,54 @@ export default function ImportWizard({
   [processedContacts]);
 
   // ---- Step 4: Confirm Import ----
-  const handleImport = () => {
+  const handleImport = async () => {
+    setIsUploading(true);
+    
+    // Check if we need to use the background bulk uploader (> 1000 rows)
+    if (importableContacts.length > 1000) {
+      try {
+        // 1. Convert processedContacts to CSV string
+        const headerRow = ['firstName', 'lastName', 'email', 'phone', 'company', 'state', 'timezone'];
+        const csvRowsData = importableContacts.map(c => [
+          c.firstName, c.lastName, c.email, c.phone, c.company, c.state, c.timezone
+        ].map(val => `"${(val || '').replace(/"/g, '""')}"`).join(','));
+        const csvString = [headerRow.join(','), ...csvRowsData].join('\n');
+
+        // 2. Get Presigned URL
+        const { url } = await api.contacts.getImportUrl();
+
+        // 3. Upload to S3
+        const response = await fetch(url, {
+          method: 'PUT',
+          body: csvString,
+          headers: {
+            'Content-Type': 'text/csv'
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error('S3 Upload Failed');
+        }
+
+        setResult({
+          added: importableContacts.length,
+          updated: 0,
+          skipped: 0,
+          blankSkipped: blankRowCount,
+          noIdSkipped: previewStats.noIdentifier,
+          background: true,
+        });
+        setStep('confirm');
+      } catch (error) {
+        console.error(error);
+        showToast('Failed to upload bulk import file', 'error');
+      } finally {
+        setIsUploading(false);
+      }
+      return;
+    }
+
+    // Synchronous local/API import (<= 1000 rows)
     const contactsToImport = importableContacts.map((c) => ({
       firstName: c.firstName,
       lastName: c.lastName,
@@ -255,6 +305,7 @@ export default function ImportWizard({
       noIdSkipped: previewStats.noIdentifier,
     });
     setStep('confirm');
+    setIsUploading(false);
   };
 
   // ---- Step index for wizard indicator ----
@@ -276,7 +327,14 @@ export default function ImportWizard({
       {result ? (
         <div className="import-success">
           <div className="import-success-icon">✓</div>
-          <p className="import-success-title">Import Complete!</p>
+          <p className="import-success-title">
+            {result.background ? 'Upload Complete!' : 'Import Complete!'}
+          </p>
+          {result.background && (
+            <p className="text-secondary mb-4" style={{ textAlign: 'center' }}>
+              Your file of {result.added} contacts has been uploaded securely and is processing in the background. It may take a few minutes for all contacts to appear.
+            </p>
+          )}
           <div className="import-success-stats">
             <div className="import-stat-card import-stat-added">
               <span className="import-stat-num">{result.added}</span>
@@ -639,11 +697,15 @@ export default function ImportWizard({
               )}
 
               <div className="form-actions">
-                <button className="btn btn-secondary" onClick={() => setStep('map')}>
+                <button className="btn btn-secondary" onClick={() => setStep('map')} disabled={isUploading}>
                   ← Back
                 </button>
-                <button className="btn btn-primary" onClick={handleImport} disabled={importableContacts.length === 0}>
-                  {consentSource ? `Import ${importableContacts.length} Contact${importableContacts.length !== 1 ? 's' : ''} →` : 'Confirm Consent Source →'}
+                <button 
+                  className="btn btn-primary" 
+                  disabled={!consentSource || importableContacts.length === 0 || isUploading}
+                  onClick={handleImport}
+                >
+                  {isUploading ? 'Uploading...' : `Import ${importableContacts.length} Contact${importableContacts.length !== 1 ? 's' : ''} →`}
                 </button>
               </div>
 

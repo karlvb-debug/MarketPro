@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, createContext, useContext } from 'react';
 import { config } from './config';
 import { api, setActiveWorkspaceId } from './api-client';
+import { useAuth } from './auth';
 
 // ============================================
 // Types
@@ -80,6 +81,7 @@ interface WorkspaceContextValue {
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
   const [state, setState] = useState<WorkspaceState>({
     workspaces: [DEFAULT_WORKSPACE],
     activeWorkspaceId: DEFAULT_WORKSPACE.workspaceId,
@@ -87,9 +89,9 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   const useApiMode = config.isApiConfigured;
 
-  // Load workspaces on mount
+  // Load workspaces on mount or when user changes
   useEffect(() => {
-    if (useApiMode) {
+    if (useApiMode && user) {
       api.workspaces.list()
         .then((res) => {
           const apiWorkspaces = ((res as any)?.data || []).map((w: any) => ({
@@ -112,11 +114,12 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
           setState(loadWorkspaceState());
           setHydrated(true);
         });
-    } else {
+    } else if (!useApiMode || !user) {
+      // If no API mode, or no user is logged in, fall back to offline/local state
       setState(loadWorkspaceState());
       setHydrated(true);
     }
-  }, [useApiMode]);
+  }, [useApiMode, user]);
 
   useEffect(() => {
     if (hydrated && !useApiMode) saveWorkspaceState(state);

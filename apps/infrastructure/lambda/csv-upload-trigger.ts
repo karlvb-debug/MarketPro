@@ -14,25 +14,19 @@ export const handler = async (event: S3Event) => {
 
     console.log(`CSV uploaded: s3://${bucket}/${key} (${fileSize} bytes)`);
 
-    // Calculate chunk boundaries (e.g., 5MB chunks for parallel processing)
-    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
-    const chunks = [];
-    for (let byteStart = 0; byteStart < fileSize; byteStart += CHUNK_SIZE) {
-      chunks.push({
-        bucket,
-        key,
-        byteStart,
-        byteEnd: Math.min(byteStart + CHUNK_SIZE - 1, fileSize - 1),
-      });
-    }
+    // Pass the bucket and key to the Step Function. The parser Lambda will handle the full file.
+    const input = {
+      bucket,
+      key,
+    };
 
-    // Start Step Function execution with chunk array as input
+    // Start Step Function execution
     await sfnClient.send(new StartExecutionCommand({
       stateMachineArn: STATE_MACHINE_ARN,
       name: `csv-ingest-${Date.now()}-${key.replace(/[^a-zA-Z0-9]/g, '-')}`.slice(0, 80),
-      input: JSON.stringify(chunks),
+      input: JSON.stringify(input),
     }));
 
-    console.log(`Started Step Function with ${chunks.length} chunk(s) for ${key}`);
+    console.log(`Started Step Function for ${key}`);
   }
 };

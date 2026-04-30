@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../lib/auth';
 import { config } from '../lib/config';
@@ -19,11 +19,12 @@ export default function LoginPage() {
   const [localError, setLocalError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // If already authenticated, redirect
-  if (user) {
-    router.push('/');
-    return null;
-  }
+  // If already authenticated, redirect (must be in useEffect, not during render)
+  useEffect(() => {
+    if (user) {
+      router.push('/');
+    }
+  }, [user, router]);
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
