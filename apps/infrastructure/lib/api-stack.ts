@@ -271,6 +271,11 @@ export class ApiStack extends cdk.Stack {
     segmentIdResource.addMethod('PUT', segmentsIntegration, securedMethodOptions);
     segmentIdResource.addMethod('DELETE', segmentsIntegration, securedMethodOptions);
 
+    // /segments/{id}/contacts — add/remove contacts from a segment
+    const segmentContactsResource = segmentIdResource.addResource('contacts');
+    segmentContactsResource.addMethod('POST', segmentsIntegration, securedMethodOptions);
+    segmentContactsResource.addMethod('DELETE', segmentsIntegration, securedMethodOptions);
+
     // ---- /campaigns ----
     const campaignsResource = this.api.root.addResource('campaigns');
     const campaignsIntegration = new apigateway.LambdaIntegration(campaignsLambda);

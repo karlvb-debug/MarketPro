@@ -768,7 +768,12 @@ export function useStore() {
       });
       return { ...prev, contacts: updatedContacts };
     });
-  }, []);
+    // Persist to DB: resolve segment ID from name
+    const seg = data.segments.find((s) => s.name === segmentName);
+    if (seg) {
+      apiCall(() => api.segments.addContacts(seg.segmentId, contactIds));
+    }
+  }, [data.segments, apiCall]);
 
   const removeContactsFromSegment = useCallback((contactIds: string[], segmentName: string) => {
     setData((prev) => {
@@ -780,7 +785,12 @@ export function useStore() {
       });
       return { ...prev, contacts: updatedContacts };
     });
-  }, []);
+    // Persist to DB: resolve segment ID from name
+    const seg = data.segments.find((s) => s.name === segmentName);
+    if (seg) {
+      apiCall(() => api.segments.removeContacts(seg.segmentId, contactIds));
+    }
+  }, [data.segments, apiCall]);
 
   const moveSegmentToFolder = useCallback((segmentId: string, folder: string) => {
     setData((prev) => {

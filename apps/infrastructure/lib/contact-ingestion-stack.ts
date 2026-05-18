@@ -57,7 +57,8 @@ export class ContactIngestionStack extends cdk.Stack {
       securityGroups: [props.lambdaSecurityGroup],
       environment: {
         UPLOAD_BUCKET: this.uploadBucket.bucketName,
-        DATABASE_URL: `postgresql://${props.database.instanceEndpoint.hostname}:5432/marketingsaas`,
+        DATABASE_SECRET_ARN: props.dbSecret.secretArn,
+        DATABASE_HOST: props.database.instanceEndpoint.hostname,
       },
     });
 

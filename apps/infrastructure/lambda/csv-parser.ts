@@ -32,7 +32,7 @@ export const handler = async (event: any) => {
     throw new Error('Workspace ID not found in S3 key');
   }
 
-  const db = getDb();
+  const db = await getDb();
 
   const getObjectResponse = await s3Client.send(new GetObjectCommand({
     Bucket: bucket,
@@ -61,7 +61,7 @@ export const handler = async (event: any) => {
       state: r.state || null,
       status: 'active' as const,
       source: 'csv_import',
-      consentSource: 'bulk_import',
+      consentSource: 'unknown',
       customFields: {},
     })).filter(r => r.email || r.phone || r.firstName || r.lastName);
 

@@ -8,7 +8,7 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { eq, and } from 'drizzle-orm';
-import { getDb, respond, getUserId, requireRole } from '../lib/db';
+import { getDb, respond, getUserId, getWorkspaceId, requireRole } from '../lib/db';
 import { workspaces, usersWorkspaces } from '../../drizzle/schema';
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
@@ -18,6 +18,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
   const db = await getDb();
   const pathId = event.pathParameters?.id;
+  const workspaceId = getWorkspaceId(event);
 
   try {
     // GET /workspaces — list workspaces for this user
@@ -61,6 +62,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     // PUT /workspaces/{id} — rename (requires admin)
     if (method === 'PUT' && pathId) {
+      // IDOR guard: ensure the URL target matches the authenticated workspace
+      if (pathId !== workspaceId) {
+        return respond(403, { message: 'Forbidden: workspace mismatch' });
+      }
       const writeDenied = requireRole(event, 'admin');
       if (writeDenied) return writeDenied;
       const body = JSON.parse(event.body || '{}');
@@ -70,6 +75,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     // DELETE /workspaces/{id} — requires owner
     if (method === 'DELETE' && pathId) {
+      // IDOR guard: ensure the URL target matches the authenticated workspace
+      if (pathId !== workspaceId) {
+        return respond(403, { message: 'Forbidden: workspace mismatch' });
+      }
       const deleteDenied = requireRole(event, 'owner');
       if (deleteDenied) return deleteDenied;
       await db.delete(workspaces).where(eq(workspaces.workspaceId, pathId));

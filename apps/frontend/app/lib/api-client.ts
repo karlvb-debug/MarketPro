@@ -206,7 +206,7 @@ export const api = {
     update: (id: string, data: unknown) => apiClient.put<unknown>(`/segments/${id}`, data),
     delete: (id: string) => apiClient.delete(`/segments/${id}`),
     addContacts: (id: string, contactIds: string[]) => apiClient.post(`/segments/${id}/contacts`, { contactIds }),
-    removeContacts: (id: string, contactIds: string[]) => apiClient.delete(`/segments/${id}/contacts`),
+    removeContacts: (id: string, contactIds: string[]) => apiClient.delete(`/segments/${id}/contacts`, { contactIds }),
   },
 
   // Campaigns
