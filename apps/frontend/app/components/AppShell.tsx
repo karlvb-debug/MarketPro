@@ -13,7 +13,7 @@ import { config } from '../lib/config';
 import { WorkspaceProvider } from '../lib/workspace';
 import { MobileNavProvider } from './MobileNav';
 import { MobileHeader } from './MobileHeader';
-import { ToastProvider } from './Toast';
+import { ToastProvider } from './ui';
 import { ConfirmProvider } from './ConfirmDialog';
 import Sidebar from './Sidebar';
 

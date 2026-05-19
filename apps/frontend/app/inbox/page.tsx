@@ -3,8 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useStore, InboxMessage } from '../lib/store';
 import PageHeader from '../components/PageHeader';
-import EmptyState from '../components/EmptyState';
-import { SearchInput } from '../components/Tabs';
+import { Button, EmptyState, SearchInput } from '../components/ui';
 
 type InboxChannel = 'sms' | 'email' | 'form';
 
@@ -77,22 +76,22 @@ export default function InboxPage() {
 
       <div className="inbox-layout">
         {/* Message list */}
-        <div className="card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: 'var(--space-4)', borderBottom: '1px solid var(--border-primary)' }}>
-            <SearchInput value={searchTerm} onChange={setSearchTerm} placeholder={`Search ${CHANNEL_CONFIG[activeChannel].label.toLowerCase()}...`} fullWidth />
+        <div className="card p-0 overflow-hidden flex flex-col">
+          <div className="p-4 border-b">
+            <SearchInput value={searchTerm} onValueChange={setSearchTerm} placeholder={`Search ${CHANNEL_CONFIG[activeChannel].label.toLowerCase()}...`} className="search-full-width" />
           </div>
-          <div style={{ flex: 1, overflowY: 'auto' }}>
+          <div className="flex-1 overflow-y-auto">
             {filtered.map((msg) => (
               <div
                 key={msg.messageId}
                 className={`inbox-message-item ${selectedId === msg.messageId ? 'selected' : ''}`}
                 onClick={() => handleSelect(msg.messageId)}
               >
-                <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-1)' }}>
-                  <span className={`font-medium ${!msg.read ? 'text-primary' : 'text-secondary'}`} style={{ fontSize: 'var(--text-sm)' }}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className={`font-medium ${!msg.read ? 'text-primary' : 'text-secondary'}`} >
                     {msg.contactName || msg.fromAddress || msg.fromNumber || 'Unknown'}
                   </span>
-                  <span className="text-tertiary" style={{ fontSize: 'var(--text-xs)' }}>
+                  <span className="text-tertiary" >
                     {new Date(msg.receivedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
                   </span>
                 </div>
@@ -120,30 +119,30 @@ export default function InboxPage() {
         </div>
 
         {/* Message detail */}
-        <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
+        <div className="card flex flex-col">
           {selected ? (
             <>
-              <div style={{ paddingBottom: 'var(--space-4)', borderBottom: '1px solid var(--border-primary)', marginBottom: 'var(--space-4)' }}>
-                <h2 className="text-primary font-semibold" style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--space-1)' }}>
+              <div className="pb-4 border-b mb-4">
+                <h2 className="text-primary font-semibold text-lg mb-1">
                   {selected.contactName || 'Unknown Contact'}
                 </h2>
                 {selected.channel === 'sms' && (
-                  <span className="font-mono text-tertiary" style={{ fontSize: 'var(--text-sm)' }}>{selected.fromNumber}</span>
+                  <span className="font-mono text-tertiary" >{selected.fromNumber}</span>
                 )}
                 {selected.channel === 'email' && (
-                  <span className="text-tertiary" style={{ fontSize: 'var(--text-sm)' }}>{selected.fromAddress}</span>
+                  <span className="text-tertiary" >{selected.fromAddress}</span>
                 )}
                 {selected.channel === 'form' && selected.formName && (
                   <span className="badge badge-neutral">{selected.formName}</span>
                 )}
                 {selected.channel === 'email' && selected.subject && (
-                  <div className="text-primary" style={{ fontSize: 'var(--text-sm)', fontWeight: 500, marginTop: 'var(--space-2)' }}>
+                  <div className="text-primary text-sm font-medium mt-2">
                     {selected.subject}
                   </div>
                 )}
               </div>
 
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+              <div className="flex-1 flex flex-col justify-end">
                 {/* Form submissions show field breakdown */}
                 {selected.channel === 'form' && selected.formFields ? (
                   <div className="inbox-form-fields">
@@ -156,8 +155,8 @@ export default function InboxPage() {
                   </div>
                 ) : (
                   <div className="inbox-bubble">
-                    <p className="text-primary" style={{ fontSize: 'var(--text-sm)', lineHeight: 1.5 }}>{selected.body}</p>
-                    <span className="text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 'var(--space-1)', display: 'block' }}>
+                    <p className="text-primary text-sm">{selected.body}</p>
+                    <span className="text-tertiary text-xs mt-1" style={{ display: 'block' }}>
                       {new Date(selected.receivedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                     </span>
                   </div>
@@ -166,9 +165,9 @@ export default function InboxPage() {
 
               {/* Reply bar — only for SMS and Email */}
               {(selected.channel === 'sms' || selected.channel === 'email') && (
-                <div style={{ display: 'flex', gap: 'var(--space-3)', paddingTop: 'var(--space-4)', borderTop: '1px solid var(--border-primary)' }}>
-                  <input type="text" className="form-input" placeholder={selected.channel === 'email' ? 'Type a reply...' : 'Type a reply...'} style={{ flex: 1 }} />
-                  <button className="btn btn-primary">Send</button>
+                <div className="flex gap-3 pt-4 border-t">
+                  <input type="text" className="form-input flex-1" placeholder={selected.channel === 'email' ? 'Type a reply...' : 'Type a reply...'} />
+                  <Button variant="primary">Send</Button>
                 </div>
               )}
             </>

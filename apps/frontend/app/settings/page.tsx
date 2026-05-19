@@ -4,11 +4,8 @@ import { useState } from 'react';
 import { useStore, CustomField } from '../lib/store';
 import { useWorkspace } from '../lib/workspace';
 import PageHeader from '../components/PageHeader';
-import Tabs from '../components/Tabs';
 import { Card } from '../components/DataTable';
-import { FormField, FormInput, FormSelect, FormActions, CheckboxChip } from '../components/FormElements';
-import Modal from '../components/Modal';
-import { showToast } from '../components/Toast';
+import { Button, Tabs, Modal, Field, Input, Select, Checkbox, FormActions, showToast } from '../components/ui';
 import { useConfirm } from '../components/ConfirmDialog';
 
 // ============================================
@@ -129,30 +126,30 @@ export default function SettingsPage() {
       {/* =========== GENERAL =========== */}
       {activeTab === 'general' && (
         <Card title="Workspace Details">
-          <FormField label="Workspace Name" required hint="This is how the workspace appears in the sidebar switcher">
-            <FormInput value={wsName} onChange={(e) => setWsName(e.target.value)} placeholder="My Agency" />
-          </FormField>
-          <FormField label="Default Timezone" hint="Used for scheduling campaigns and TCPA compliance">
-            <FormSelect value={channels.timezone} onChange={(e) => setChannels({ ...channels, timezone: e.target.value })}>
+          <Field label="Workspace Name" required hint="This is how the workspace appears in the sidebar switcher">
+            <Input value={wsName} onChange={(e) => setWsName(e.target.value)} placeholder="My Agency" />
+          </Field>
+          <Field label="Default Timezone" hint="Used for scheduling campaigns and TCPA compliance">
+            <Select value={channels.timezone} onChange={(e) => setChannels({ ...channels, timezone: e.target.value })}>
               <option value="America/New_York">Eastern Time (ET)</option>
               <option value="America/Chicago">Central Time (CT)</option>
               <option value="America/Denver">Mountain Time (MT)</option>
               <option value="America/Los_Angeles">Pacific Time (PT)</option>
               <option value="UTC">UTC</option>
-            </FormSelect>
-          </FormField>
+            </Select>
+          </Field>
 
           <div className="info-box mb-5">
-            <p className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
+            <p className="text-secondary text-sm">
               <strong>Workspace ID:</strong> <span className="font-mono text-tertiary">{activeWorkspace.workspaceId}</span>
             </p>
-            <p className="text-secondary" style={{ fontSize: 'var(--text-sm)', marginTop: 'var(--space-1)' }}>
+            <p className="text-secondary text-sm mt-1">
               <strong>Created:</strong> <span className="text-tertiary">{new Date(activeWorkspace.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
             </p>
           </div>
 
           <FormActions>
-            <button className="btn btn-primary" onClick={handleSaveGeneral}>Save Changes</button>
+            <Button variant="primary" onClick={handleSaveGeneral}>Save Changes</Button>
           </FormActions>
         </Card>
       )}
@@ -162,37 +159,37 @@ export default function SettingsPage() {
         <>
           <Card title="Email Configuration" className="mb-6">
             <div className="form-grid-2">
-              <FormField label="From Name" hint="The sender name recipients will see">
-                <FormInput value={channels.emailFromName} onChange={(e) => setChannels({ ...channels, emailFromName: e.target.value })} placeholder="Acme Marketing" />
-              </FormField>
-              <FormField label="From Address" hint="Must be a verified domain in SES">
-                <FormInput type="email" value={channels.emailFromAddress} onChange={(e) => setChannels({ ...channels, emailFromAddress: e.target.value })} placeholder="marketing@acme.com" />
-              </FormField>
+              <Field label="From Name" hint="The sender name recipients will see">
+                <Input value={channels.emailFromName} onChange={(e) => setChannels({ ...channels, emailFromName: e.target.value })} placeholder="Acme Marketing" />
+              </Field>
+              <Field label="From Address" hint="Must be a verified domain in SES">
+                <Input type="email" value={channels.emailFromAddress} onChange={(e) => setChannels({ ...channels, emailFromAddress: e.target.value })} placeholder="marketing@acme.com" />
+              </Field>
             </div>
-            <FormField label="Reply-To Address" hint="Where replies get sent — can differ from the From address">
-              <FormInput type="email" value={channels.emailReplyTo} onChange={(e) => setChannels({ ...channels, emailReplyTo: e.target.value })} placeholder="support@acme.com" />
-            </FormField>
+            <Field label="Reply-To Address" hint="Where replies get sent — can differ from the From address">
+              <Input type="email" value={channels.emailReplyTo} onChange={(e) => setChannels({ ...channels, emailReplyTo: e.target.value })} placeholder="support@acme.com" />
+            </Field>
           </Card>
 
           <Card title="SMS Configuration" className="mb-6">
             <div className="form-grid-2">
-              <FormField label="Sender ID / Short Code" hint="Alphanumeric ID or short code for outbound SMS">
-                <FormInput value={channels.smsSenderId} onChange={(e) => setChannels({ ...channels, smsSenderId: e.target.value })} placeholder="ACME or 12345" />
-              </FormField>
-              <FormField label="Phone Number" hint="E.164 format — the number SMS are sent from">
-                <FormInput type="tel" value={channels.smsPhoneNumber} onChange={(e) => setChannels({ ...channels, smsPhoneNumber: e.target.value })} placeholder="+15551234567" />
-              </FormField>
+              <Field label="Sender ID / Short Code" hint="Alphanumeric ID or short code for outbound SMS">
+                <Input value={channels.smsSenderId} onChange={(e) => setChannels({ ...channels, smsSenderId: e.target.value })} placeholder="ACME or 12345" />
+              </Field>
+              <Field label="Phone Number" hint="E.164 format — the number SMS are sent from">
+                <Input type="tel" value={channels.smsPhoneNumber} onChange={(e) => setChannels({ ...channels, smsPhoneNumber: e.target.value })} placeholder="+15551234567" />
+              </Field>
             </div>
           </Card>
 
           <Card title="Voice Configuration" className="mb-6">
-            <FormField label="Caller ID Number" hint="The phone number displayed on outbound calls">
-              <FormInput type="tel" value={channels.voicePhoneNumber} onChange={(e) => setChannels({ ...channels, voicePhoneNumber: e.target.value })} placeholder="+15551234567" />
-            </FormField>
+            <Field label="Caller ID Number" hint="The phone number displayed on outbound calls">
+              <Input type="tel" value={channels.voicePhoneNumber} onChange={(e) => setChannels({ ...channels, voicePhoneNumber: e.target.value })} placeholder="+15551234567" />
+            </Field>
           </Card>
 
           <FormActions>
-            <button className="btn btn-primary" onClick={handleSaveChannels}>Save Channel Settings</button>
+            <Button variant="primary" onClick={handleSaveChannels}>Save Channel Settings</Button>
           </FormActions>
         </>
       )}
@@ -202,20 +199,20 @@ export default function SettingsPage() {
         <>
           {/* Compliance Status Overview */}
           <Card title="Compliance Status" className="mb-6">
-            <div style={{ display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+            <div className="flex gap-4 flex-wrap">
               <div className={`info-box ${hasBusinessAddress ? '' : 'info-box-warning'}`} style={{ flex: 1, minWidth: 200 }}>
-                <p className="font-medium text-primary" style={{ fontSize: 'var(--text-sm)', marginBottom: 'var(--space-1)' }}>
+                <p className="font-medium text-primary text-sm mb-1">
                   {hasBusinessAddress ? '✅' : '⚠️'} Physical Address
                 </p>
-                <p className="text-tertiary" style={{ fontSize: 'var(--text-xs)' }}>
+                <p className="text-tertiary text-xs" >
                   {hasBusinessAddress ? 'Set — will be included in email footers' : 'Required for CAN-SPAM compliance'}
                 </p>
               </div>
               <div className={`info-box ${dncOverdue ? 'info-box-warning' : ''}`} style={{ flex: 1, minWidth: 200 }}>
-                <p className="font-medium text-primary" style={{ fontSize: 'var(--text-sm)', marginBottom: 'var(--space-1)' }}>
+                <p className="font-medium text-primary text-sm mb-1">
                   {dncScrubAge === null ? '⚠️' : dncOverdue ? '🔴' : '✅'} DNC Scrub
                 </p>
-                <p className="text-tertiary" style={{ fontSize: 'var(--text-xs)' }}>
+                <p className="text-tertiary text-xs" >
                   {dncScrubAge === null
                     ? 'Never performed'
                     : dncOverdue
@@ -228,71 +225,71 @@ export default function SettingsPage() {
 
           {/* Business Address (CAN-SPAM) */}
           <Card title="Business Address" className="mb-6">
-            <p className="text-secondary mb-5" style={{ fontSize: 'var(--text-sm)' }}>
+            <p className="text-secondary mb-5 text-sm">
               CAN-SPAM requires a valid physical postal address in every commercial email. This address will be automatically injected into your email footers.
             </p>
-            <FormField label="Business / Organization Name">
-              <FormInput value={compliance.businessName} onChange={(e) => setCompliance({ ...compliance, businessName: e.target.value })} placeholder="Acme Marketing Inc." />
-            </FormField>
-            <FormField label="Street Address" required>
-              <FormInput value={compliance.businessAddress} onChange={(e) => setCompliance({ ...compliance, businessAddress: e.target.value })} placeholder="123 Main St, Suite 100" />
-            </FormField>
+            <Field label="Business / Organization Name">
+              <Input value={compliance.businessName} onChange={(e) => setCompliance({ ...compliance, businessName: e.target.value })} placeholder="Acme Marketing Inc." />
+            </Field>
+            <Field label="Street Address" required>
+              <Input value={compliance.businessAddress} onChange={(e) => setCompliance({ ...compliance, businessAddress: e.target.value })} placeholder="123 Main St, Suite 100" />
+            </Field>
             <div className="form-grid-2">
-              <FormField label="City">
-                <FormInput value={compliance.businessCity} onChange={(e) => setCompliance({ ...compliance, businessCity: e.target.value })} placeholder="New York" />
-              </FormField>
-              <FormField label="State">
-                <FormInput value={compliance.businessState} onChange={(e) => setCompliance({ ...compliance, businessState: e.target.value })} placeholder="NY" />
-              </FormField>
+              <Field label="City">
+                <Input value={compliance.businessCity} onChange={(e) => setCompliance({ ...compliance, businessCity: e.target.value })} placeholder="New York" />
+              </Field>
+              <Field label="State">
+                <Input value={compliance.businessState} onChange={(e) => setCompliance({ ...compliance, businessState: e.target.value })} placeholder="NY" />
+              </Field>
             </div>
             <div className="form-grid-2">
-              <FormField label="ZIP Code">
-                <FormInput value={compliance.businessZip} onChange={(e) => setCompliance({ ...compliance, businessZip: e.target.value })} placeholder="10001" />
-              </FormField>
-              <FormField label="Country">
-                <FormSelect value={compliance.businessCountry} onChange={(e) => setCompliance({ ...compliance, businessCountry: e.target.value })}>
+              <Field label="ZIP Code">
+                <Input value={compliance.businessZip} onChange={(e) => setCompliance({ ...compliance, businessZip: e.target.value })} placeholder="10001" />
+              </Field>
+              <Field label="Country">
+                <Select value={compliance.businessCountry} onChange={(e) => setCompliance({ ...compliance, businessCountry: e.target.value })}>
                   <option value="US">United States</option>
                   <option value="CA">Canada</option>
                   <option value="GB">United Kingdom</option>
                   <option value="AU">Australia</option>
-                </FormSelect>
-              </FormField>
+                </Select>
+              </Field>
             </div>
           </Card>
 
           {/* DNC Registry */}
           <Card title="Do Not Call (DNC) Registry" className="mb-6">
-            <p className="text-secondary mb-5" style={{ fontSize: 'var(--text-sm)' }}>
+            <p className="text-secondary mb-5 text-sm">
               Federal law requires scrubbing your call/SMS lists against the National DNC registry <strong>every 31 days</strong>. You must have an FTC Subscription Account Number (SAN) to access the registry.
             </p>
-            <FormField label="FTC SAN Number" hint="Your Subscription Account Number from telemarketing.donotcall.gov">
-              <FormInput value={compliance.sanNumber} onChange={(e) => setCompliance({ ...compliance, sanNumber: e.target.value })} placeholder="SAN-XXXXXXXXXX" />
-            </FormField>
+            <Field label="FTC SAN Number" hint="Your Subscription Account Number from telemarketing.donotcall.gov">
+              <Input value={compliance.sanNumber} onChange={(e) => setCompliance({ ...compliance, sanNumber: e.target.value })} placeholder="SAN-XXXXXXXXXX" />
+            </Field>
             <div className="info-box mb-5">
-              <p className="text-secondary" style={{ fontSize: 'var(--text-xs)', lineHeight: 1.6 }}>
+              <p className="text-secondary text-xs" style={{ lineHeight: 1.6 }}>
                 <strong>Don&apos;t have a SAN?</strong> Register at{' '}
-                <a href="https://telemarketing.donotcall.gov" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-primary)' }}>telemarketing.donotcall.gov</a>.
+                <a href="https://telemarketing.donotcall.gov" target="_blank" rel="noopener noreferrer" className="text-accent">telemarketing.donotcall.gov</a>.
                 The first 5 area codes are free. Additional area codes cost $82/year (FY 2026).
               </p>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+            <div className="flex items-center gap-4 flex-wrap">
               <div>
-                <p className="text-primary font-medium" style={{ fontSize: 'var(--text-sm)' }}>Last scrub:</p>
-                <p className={`font-medium ${dncOverdue ? 'text-danger' : 'text-secondary'}`} style={{ fontSize: 'var(--text-sm)' }}>
+                <p className="text-primary font-medium text-sm">Last scrub:</p>
+                <p className={`font-medium text-sm ${dncOverdue ? 'text-danger' : 'text-secondary'}`}>
                   {store.settings.lastDncScrubDate
                     ? new Date(store.settings.lastDncScrubDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
                     : 'Never'}
                   {dncOverdue && ' — OVERDUE'}
                 </p>
               </div>
-              <button className="btn btn-secondary btn-sm" onClick={handleMarkDncScrub}>
+              <Button size="sm" onClick={handleMarkDncScrub}>
                 Mark Scrub Complete
-              </button>
+              </Button>
             </div>
           </Card>
 
           <FormActions>
-            <button className="btn btn-primary" onClick={handleSaveCompliance}>Save Compliance Settings</button>
+            <Button variant="primary" onClick={handleSaveCompliance}>Save Compliance Settings</Button>
           </FormActions>
         </>
       )}
@@ -302,9 +299,9 @@ export default function SettingsPage() {
         <>
           <Card
             title="Custom Contact Fields"
-            action={<button className="btn btn-primary btn-sm" onClick={() => setShowAddField(true)}>+ Add Field</button>}
+            action={<Button variant="primary" size="sm" onClick={() => setShowAddField(true)}>+ Add Field</Button>}
           >
-            <p className="text-secondary mb-5" style={{ fontSize: 'var(--text-sm)' }}>
+            <p className="text-secondary mb-5 text-sm">
               Define custom fields to capture additional data on your contacts. Fields marked as <strong>Unique</strong> will be enforced as unique identifiers alongside email and phone.
             </p>
 
@@ -346,8 +343,8 @@ export default function SettingsPage() {
                     {field.type === 'select' && field.options && (
                       <span className="badge badge-neutral">{field.options.length} options</span>
                     )}
-                    <button
-                      className="btn btn-ghost btn-sm"
+                    <Button
+                      variant="ghost" size="sm"
                       title={`Toggle unique identifier for ${field.name}`}
                       onClick={() => {
                         store.updateCustomField(field.fieldId, { isUnique: !field.isUnique });
@@ -356,22 +353,22 @@ export default function SettingsPage() {
                       style={{ color: field.isUnique ? 'var(--accent-primary)' : 'var(--text-tertiary)' }}
                     >
                       ≡
-                    </button>
-                    <button
-                      className="btn btn-ghost btn-sm"
+                    </Button>
+                    <Button
+                      variant="ghost" size="sm"
                       title={`Delete ${field.name}`}
                       onClick={() => { store.deleteCustomField(field.fieldId); showToast(`Field "${field.name}" removed`); }}
-                      style={{ color: 'var(--text-tertiary)' }}
+                      
                     >
                       ✕
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ))}
 
               {store.settings.customFields.length === 0 && (
                 <div className="settings-field-empty">
-                  <p className="text-tertiary" style={{ fontSize: 'var(--text-sm)' }}>No custom fields defined yet. Click &quot;+ Add Field&quot; to create one.</p>
+                  <p className="text-tertiary text-sm">No custom fields defined yet. Click &quot;+ Add Field&quot; to create one.</p>
                 </div>
               )}
             </div>
@@ -384,40 +381,40 @@ export default function SettingsPage() {
         <Card title="Danger Zone">
           <div className="settings-danger-item">
             <div>
-              <h3 className="text-primary font-medium" style={{ fontSize: 'var(--text-sm)', marginBottom: 'var(--space-1)' }}>Reset Workspace Data</h3>
-              <p className="text-tertiary" style={{ fontSize: 'var(--text-xs)' }}>Restore this workspace to its default seed data. All contacts, campaigns, and templates will be replaced.</p>
+              <h3 className="text-primary font-medium text-sm mb-1">Reset Workspace Data</h3>
+              <p className="text-tertiary text-xs" >Restore this workspace to its default seed data. All contacts, campaigns, and templates will be replaced.</p>
             </div>
-            <button className="btn btn-danger btn-sm" onClick={async () => {
+            <Button variant="danger" size="sm" onClick={async () => {
               const ok = await confirm('This will reset ALL data in this workspace to defaults. Are you sure?', { title: 'Reset Workspace', variant: 'danger', confirmLabel: 'Reset Data' });
               if (ok) {
                 store.resetData();
                 showToast('Workspace data reset to defaults', 'info');
               }
-            }}>Reset Data</button>
+            }}>Reset Data</Button>
           </div>
 
           {workspaces.length > 1 && (
             <div className="settings-danger-item">
               <div>
-                <h3 className="text-primary font-medium" style={{ fontSize: 'var(--text-sm)', marginBottom: 'var(--space-1)' }}>Delete Workspace</h3>
-                <p className="text-tertiary" style={{ fontSize: 'var(--text-xs)' }}>Permanently delete &quot;{activeWorkspace.name}&quot; and all its data. You cannot undo this.</p>
+                <h3 className="text-primary font-medium text-sm mb-1">Delete Workspace</h3>
+                <p className="text-tertiary text-xs" >Permanently delete &quot;{activeWorkspace.name}&quot; and all its data. You cannot undo this.</p>
               </div>
-              <button className="btn btn-danger btn-sm" onClick={async () => {
+              <Button variant="danger" size="sm" onClick={async () => {
                 const ok = await confirm(`Permanently delete "${activeWorkspace.name}"? This cannot be undone.`, { title: 'Delete Workspace', variant: 'danger', confirmLabel: 'Delete Workspace' });
                 if (ok) {
                   deleteWorkspace(activeWorkspace.workspaceId);
                   showToast(`Workspace "${activeWorkspace.name}" deleted`, 'info');
                 }
-              }}>Delete Workspace</button>
+              }}>Delete Workspace</Button>
             </div>
           )}
         </Card>
       )}
 
       {/* =========== ADD FIELD MODAL =========== */}
-      <Modal isOpen={showAddField} onClose={() => setShowAddField(false)} title="Add Custom Field" width="540px">
-        <FormField label="Field Name" required hint="The label shown on the contact form">
-          <FormInput
+      <Modal isOpen={showAddField} onClose={() => setShowAddField(false)} title="Add Custom Field" size="md">
+        <Field label="Field Name" required hint="The label shown on the contact form">
+          <Input
             placeholder="e.g. CRM ID, Account Number, Company Size"
             value={newField.name}
             onChange={(e) => {
@@ -426,47 +423,47 @@ export default function SettingsPage() {
               setNewField({ ...newField, name, key });
             }}
           />
-        </FormField>
+        </Field>
 
-        <FormField label="Field Key" hint="Used internally for data storage and API access. Auto-generated from the name.">
-          <FormInput
+        <Field label="Field Key" hint="Used internally for data storage and API access. Auto-generated from the name.">
+          <Input
             className="font-mono"
             placeholder="crm_id"
             value={newField.key}
             onChange={(e) => setNewField({ ...newField, key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '') })}
           />
-        </FormField>
+        </Field>
 
-        <FormField label="Field Type" required>
-          <FormSelect value={newField.type} onChange={(e) => setNewField({ ...newField, type: e.target.value as CustomField['type'] })}>
+        <Field label="Field Type" required>
+          <Select value={newField.type} onChange={(e) => setNewField({ ...newField, type: e.target.value as CustomField['type'] })}>
             {FIELD_TYPES.map((t) => <option key={t.value} value={t.value}>{t.icon} {t.label}</option>)}
-          </FormSelect>
-        </FormField>
+          </Select>
+        </Field>
 
         {newField.type === 'select' && (
-          <FormField label="Options" required hint="Comma-separated list of dropdown options">
-            <FormInput
+          <Field label="Options" required hint="Comma-separated list of dropdown options">
+            <Input
               placeholder="Small, Medium, Large, Enterprise"
               value={newField.options}
               onChange={(e) => setNewField({ ...newField, options: e.target.value })}
             />
-          </FormField>
+          </Field>
         )}
 
         <div className="flex gap-4 mb-5">
-          <CheckboxChip label="Unique Identifier" checked={newField.isUnique} onChange={() => setNewField({ ...newField, isUnique: !newField.isUnique })} />
-          <CheckboxChip label="Required Field" checked={newField.required} onChange={() => setNewField({ ...newField, required: !newField.required })} />
+          <Checkbox label="Unique Identifier" checked={newField.isUnique} onChange={() => setNewField({ ...newField, isUnique: !newField.isUnique })} />
+          <Checkbox label="Required Field" checked={newField.required} onChange={() => setNewField({ ...newField, required: !newField.required })} />
         </div>
 
         {newField.isUnique && (
-          <div className="info-box mb-5" style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
+          <div className="info-box mb-5 text-xs text-tertiary">
              <strong>Unique Identifier:</strong> This field will be enforced as unique across all contacts. Duplicates with the same value will be rejected during import and manual entry.
           </div>
         )}
 
         <FormActions>
-          <button className="btn btn-secondary" onClick={() => setShowAddField(false)}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleAddField} disabled={!newField.name.trim()}>Add Field</button>
+          <Button onClick={() => setShowAddField(false)}>Cancel</Button>
+          <Button variant="primary" onClick={handleAddField} disabled={!newField.name.trim()}>Add Field</Button>
         </FormActions>
       </Modal>
     </>

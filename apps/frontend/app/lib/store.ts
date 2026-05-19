@@ -300,21 +300,37 @@ async function loadFromApi(): Promise<StoreData | null> {
     if (!res) return null;
 
     const rawContacts = res.contacts || [];
-    const contacts: Contact[] = rawContacts.map((row: any) => ({
-      contactId: row.contactId || row.contact_id || crypto.randomUUID(),
-      firstName: row.firstName || row.first_name || '',
-      lastName: row.lastName || row.last_name || '',
-      email: row.email || '',
-      phone: row.phone || '',
-      company: row.company || '',
-      timezone: row.timezone || undefined,
-      compliance: defaultCompliance(),
-      segments: [],
-      source: row.source || '',
-      consentSource: row.consentSource || row.consent_source || undefined,
-      customFields: row.customFields || row.custom_fields || undefined,
-      createdAt: row.createdAt || row.created_at || new Date().toISOString(),
-    }));
+    const contacts: Contact[] = rawContacts.map((row: any) => {
+      const status = row.status || 'active';
+      const comp = defaultCompliance();
+      // Rebuild compliance from DB status
+      if (status === 'unsubscribed') {
+        const ts = row.updatedAt || row.updated_at || new Date().toISOString();
+        comp.email = { suppressed: true, reason: 'unsubscribed', updatedAt: ts };
+        comp.sms = { suppressed: true, reason: 'unsubscribed', updatedAt: ts };
+        comp.voice = { suppressed: true, reason: 'unsubscribed', updatedAt: ts };
+      } else if (status === 'bounced') {
+        comp.email = { suppressed: true, reason: 'bounced', updatedAt: row.updatedAt || row.updated_at || new Date().toISOString() };
+      } else if (status === 'complained') {
+        comp.email = { suppressed: true, reason: 'complained', updatedAt: row.updatedAt || row.updated_at || new Date().toISOString() };
+      }
+      return {
+        contactId: row.contactId || row.contact_id || crypto.randomUUID(),
+        firstName: row.firstName || row.first_name || '',
+        lastName: row.lastName || row.last_name || '',
+        email: row.email || '',
+        phone: row.phone || '',
+        company: row.company || '',
+        timezone: row.timezone || undefined,
+        state: row.state || undefined,
+        compliance: comp,
+        segments: [],
+        source: row.source || '',
+        consentSource: row.consentSource || row.consent_source || undefined,
+        customFields: row.customFields || row.custom_fields || undefined,
+        createdAt: row.createdAt || row.created_at || new Date().toISOString(),
+      };
+    });
 
     const rawSegments = res.segments || [];
     const segments: Segment[] = rawSegments.map((row: any) => ({
@@ -326,6 +342,28 @@ async function loadFromApi(): Promise<StoreData | null> {
       order: row.sortOrder || row.sort_order || 0,
       color: row.color || undefined,
     }));
+
+    // Build segment membership: contactId → [segmentName, ...]
+    const segmentIdToName = new Map<string, string>();
+    for (const seg of segments) {
+      segmentIdToName.set(seg.segmentId, seg.name);
+    }
+    const contactSegmentMap = new Map<string, string[]>();
+    for (const cs of (res.contactSegments || [])) {
+      const cid = cs.contactId || cs.contact_id;
+      const sid = cs.segmentId || cs.segment_id;
+      const segName = segmentIdToName.get(sid);
+      if (cid && segName) {
+        const existing = contactSegmentMap.get(cid) || [];
+        existing.push(segName);
+        contactSegmentMap.set(cid, existing);
+      }
+    }
+
+    // Populate each contact's segments array
+    for (const c of contacts) {
+      c.segments = contactSegmentMap.get(c.contactId) || [];
+    }
 
     const rawCampaigns = res.campaigns || [];
     const campaigns: Campaign[] = rawCampaigns.map((row: any) => ({
@@ -429,9 +467,9 @@ export function useStore() {
 
   // ---- CONTACTS ----
 
-  // Check for duplicate email/phone before adding — returns error string or null
-  const addContact = useCallback((contact: Omit<Contact, 'contactId' | 'createdAt' | 'status' | 'compliance'>): string | null => {
-    // Check against current data snapshot (synchronous)
+  // Create contact via API — returns error string on failure, null on success
+  const addContact = useCallback(async (contact: Omit<Contact, 'contactId' | 'createdAt' | 'status' | 'compliance'>): Promise<string | null> => {
+    // Local duplicate check (fast pre-flight)
     if (contact.email) {
       const emailMatch = data.contacts.find(
         (c) => c.email.toLowerCase() === contact.email.toLowerCase()
@@ -451,39 +489,69 @@ export function useStore() {
       }
     }
 
-    const newContact: Contact = {
-      ...contact,
-      contactId: crypto.randomUUID(),
-      compliance: defaultCompliance(),
-      createdAt: new Date().toISOString(),
-    };
+    // Create on server — server generates the canonical UUID
+    try {
+      const row = await api.contacts.create(contactToApi(contact)) as any;
+      const newContact: Contact = {
+        ...contact,
+        contactId: row.contactId || row.contact_id || crypto.randomUUID(),
+        compliance: defaultCompliance(),
+        createdAt: row.createdAt || row.created_at || new Date().toISOString(),
+      };
 
-    setData((prev) => {
-      const updatedSegments = prev.segments.map((seg) => ({
-        ...seg,
-        count: contact.segments.includes(seg.name) ? seg.count + 1 : seg.count,
-      }));
-      return { ...prev, contacts: [newContact, ...prev.contacts], segments: updatedSegments };
-    });
+      setData((prev) => {
+        const updatedSegments = prev.segments.map((seg) => ({
+          ...seg,
+          count: contact.segments.includes(seg.name) ? seg.count + 1 : seg.count,
+        }));
+        return { ...prev, contacts: [newContact, ...prev.contacts], segments: updatedSegments };
+      });
 
-    // API: create contact
-    apiCall(() => api.contacts.create(contactToApi(contact)));
+      return null;
+    } catch (err: any) {
+      console.error('[API] Create contact failed:', err);
+      return err?.message || 'Failed to create contact. Please try again.';
+    }
+  }, [data.contacts]);
 
-    return null;
-  }, [data.contacts, apiCall]);
-
-  const updateContact = useCallback((contactId: string, patch: Partial<Omit<Contact, 'contactId' | 'createdAt'>>) => {
+  const updateContact = useCallback(async (contactId: string, patch: Partial<Omit<Contact, 'contactId' | 'createdAt'>>) => {
+    // Optimistic local update
     setData((prev) => ({
       ...prev,
       contacts: prev.contacts.map((c) =>
         c.contactId === contactId ? { ...c, ...patch } : c
       ),
     }));
-    // API: update contact
-    apiCall(() => api.contacts.update(contactId, contactToApi(patch as any)));
-  }, [apiCall]);
 
-  const updateCompliance = useCallback((contactId: string, channel: 'email' | 'sms' | 'voice', reason: SuppressionReason, isDnc = false) => {
+    // Persist to server — use returned row as canonical state
+    try {
+      const row = await api.contacts.update(contactId, contactToApi(patch as any)) as any;
+      if (row && row.contactId || row.contact_id) {
+        setData((prev) => ({
+          ...prev,
+          contacts: prev.contacts.map((c) => {
+            if (c.contactId !== contactId) return c;
+            return {
+              ...c,
+              firstName: row.firstName || row.first_name || c.firstName,
+              lastName: row.lastName || row.last_name || c.lastName,
+              email: row.email || c.email,
+              phone: row.phone || c.phone,
+              company: row.company || c.company,
+              timezone: row.timezone || c.timezone,
+              state: row.state || c.state,
+              consentSource: row.consentSource || row.consent_source || c.consentSource,
+            };
+          }),
+        }));
+      }
+    } catch (err) {
+      console.error('[API] Update contact failed:', err);
+    }
+  }, []);
+
+  const updateCompliance = useCallback(async (contactId: string, channel: 'email' | 'sms' | 'voice', reason: SuppressionReason, isDnc = false) => {
+    // Optimistic local update
     setData((prev) => ({
       ...prev,
       contacts: prev.contacts.map((c) => {
@@ -504,27 +572,57 @@ export function useStore() {
         return { ...c, compliance };
       }),
     }));
+
+    // Persist to backend — map compliance reason → DB contact status
+    // The contacts table status enum: active | unsubscribed | bounced | complained
+    try {
+      let dbStatus: string = 'active';
+      if (isDnc || reason === 'dnc') {
+        dbStatus = 'unsubscribed';
+      } else if (reason === 'none') {
+        dbStatus = 'active';
+      } else if (reason === 'unsubscribed' || reason === 'stop') {
+        dbStatus = 'unsubscribed';
+      } else if (reason === 'bounced') {
+        dbStatus = 'bounced';
+      } else if (reason === 'complained') {
+        dbStatus = 'complained';
+      } else if (reason === 'invalid') {
+        dbStatus = 'bounced'; // Map 'invalid' to 'bounced' — both block sends
+      }
+
+      await api.contacts.update(contactId, { status: dbStatus });
+    } catch (err) {
+      console.error('[API] Update compliance failed:', err);
+    }
   }, []);
 
-  const deleteContact = useCallback((contactId: string) => {
-    setData((prev) => ({
-      ...prev,
-      contacts: prev.contacts.filter((c) => c.contactId !== contactId),
-    }));
-    // API: delete contact
-    apiCall(() => api.contacts.delete(contactId));
-  }, [apiCall]);
+  const deleteContact = useCallback(async (contactId: string) => {
+    try {
+      await api.contacts.delete(contactId);
+      setData((prev) => ({
+        ...prev,
+        contacts: prev.contacts.filter((c) => c.contactId !== contactId),
+      }));
+    } catch (err) {
+      console.error('[API] Delete contact failed:', err);
+    }
+  }, []);
 
   // Bulk delete — single API call for up to 500 contacts
-  const bulkDeleteContacts = useCallback((contactIds: string[]) => {
+  const bulkDeleteContacts = useCallback(async (contactIds: string[]) => {
     if (contactIds.length === 0) return;
-    const idSet = new Set(contactIds);
-    setData((prev) => ({
-      ...prev,
-      contacts: prev.contacts.filter((c) => !idSet.has(c.contactId)),
-    }));
-    apiCall(() => api.contacts.bulkDelete(contactIds));
-  }, [apiCall]);
+    try {
+      await api.contacts.bulkDelete(contactIds);
+      const idSet = new Set(contactIds);
+      setData((prev) => ({
+        ...prev,
+        contacts: prev.contacts.filter((c) => !idSet.has(c.contactId)),
+      }));
+    } catch (err) {
+      console.error('[API] Bulk delete failed:', err);
+    }
+  }, []);
 
   // Returns { added, skipped, blankSkipped } — skips contacts with duplicate email/phone and blank/unidentifiable rows
   const importContacts = useCallback((newContacts: Omit<Contact, 'contactId' | 'createdAt' | 'compliance'>[]): { added: number; updated: number; skipped: number; blankSkipped: number } => {
@@ -758,39 +856,54 @@ export function useStore() {
     });
   }, []);
 
-  const addContactsToSegment = useCallback((contactIds: string[], segmentName: string) => {
-    setData((prev) => {
-      const updatedContacts = prev.contacts.map((c) => {
-        if (contactIds.includes(c.contactId) && !c.segments.includes(segmentName)) {
-          return { ...c, segments: [...c.segments, segmentName] };
-        }
-        return c;
-      });
-      return { ...prev, contacts: updatedContacts };
-    });
-    // Persist to DB: resolve segment ID from name
+  const addContactsToSegment = useCallback(async (contactIds: string[], segmentName: string) => {
     const seg = data.segments.find((s) => s.name === segmentName);
-    if (seg) {
-      apiCall(() => api.segments.addContacts(seg.segmentId, contactIds));
-    }
-  }, [data.segments, apiCall]);
+    if (!seg) return;
 
-  const removeContactsFromSegment = useCallback((contactIds: string[], segmentName: string) => {
-    setData((prev) => {
-      const updatedContacts = prev.contacts.map((c) => {
-        if (contactIds.includes(c.contactId)) {
-          return { ...c, segments: c.segments.filter((s) => s !== segmentName) };
-        }
-        return c;
+    try {
+      await api.segments.addContacts(seg.segmentId, contactIds);
+      setData((prev) => {
+        const updatedContacts = prev.contacts.map((c) => {
+          if (contactIds.includes(c.contactId) && !c.segments.includes(segmentName)) {
+            return { ...c, segments: [...c.segments, segmentName] };
+          }
+          return c;
+        });
+        // Recount segment membership from updated contacts
+        const newCount = updatedContacts.filter((c) => c.segments.includes(segmentName)).length;
+        const updatedSegments = prev.segments.map((s) =>
+          s.segmentId === seg.segmentId ? { ...s, count: newCount } : s
+        );
+        return { ...prev, contacts: updatedContacts, segments: updatedSegments };
       });
-      return { ...prev, contacts: updatedContacts };
-    });
-    // Persist to DB: resolve segment ID from name
-    const seg = data.segments.find((s) => s.name === segmentName);
-    if (seg) {
-      apiCall(() => api.segments.removeContacts(seg.segmentId, contactIds));
+    } catch (err) {
+      console.error('[API] Add contacts to segment failed:', err);
     }
-  }, [data.segments, apiCall]);
+  }, [data.segments]);
+
+  const removeContactsFromSegment = useCallback(async (contactIds: string[], segmentName: string) => {
+    const seg = data.segments.find((s) => s.name === segmentName);
+    if (!seg) return;
+
+    try {
+      await api.segments.removeContacts(seg.segmentId, contactIds);
+      setData((prev) => {
+        const updatedContacts = prev.contacts.map((c) => {
+          if (contactIds.includes(c.contactId)) {
+            return { ...c, segments: c.segments.filter((s) => s !== segmentName) };
+          }
+          return c;
+        });
+        const newCount = updatedContacts.filter((c) => c.segments.includes(segmentName)).length;
+        const updatedSegments = prev.segments.map((s) =>
+          s.segmentId === seg.segmentId ? { ...s, count: newCount } : s
+        );
+        return { ...prev, contacts: updatedContacts, segments: updatedSegments };
+      });
+    } catch (err) {
+      console.error('[API] Remove contacts from segment failed:', err);
+    }
+  }, [data.segments]);
 
   const moveSegmentToFolder = useCallback((segmentId: string, folder: string) => {
     setData((prev) => {
@@ -1150,6 +1263,22 @@ export function useStore() {
     if (fresh) setData(fresh);
   }, []);
 
+  // Reload contacts + segments from API without wiping other data
+  const refreshContacts = useCallback(async () => {
+    try {
+      const fresh = await loadFromApi();
+      if (fresh) {
+        setData((prev) => ({
+          ...prev,
+          contacts: fresh.contacts,
+          segments: fresh.segments,
+        }));
+      }
+    } catch (err) {
+      console.error('[API] Refresh contacts failed:', err);
+    }
+  }, []);
+
   return {
     ...data,
     segments,
@@ -1191,5 +1320,6 @@ export function useStore() {
     updateCustomField,
     deleteCustomField,
     resetData,
+    refreshContacts,
   };
 }

@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useRef, useMemo, useCallback } from 'react';
-import Modal from './Modal';
-import { FormSelect } from './FormElements';
-import { showToast } from './Toast';
+import { Button, Modal, Select, showToast } from './ui';
+
+
 import {
   parseCsv,
   parseXlsx,
@@ -30,6 +30,7 @@ interface ImportWizardProps {
   importContacts: (
     contacts: Omit<Contact, 'contactId' | 'createdAt' | 'compliance'>[]
   ) => { added: number; updated: number; skipped: number; blankSkipped?: number };
+  refreshContacts?: () => Promise<void>;
 }
 
 const STEPS: { key: ImportStep; label: string }[] = [
@@ -48,6 +49,7 @@ export default function ImportWizard({
   onClose,
   activeSegmentName,
   importContacts,
+  refreshContacts,
 }: ImportWizardProps) {
   // Step state
   const [step, setStep] = useState<ImportStep>('upload');
@@ -273,6 +275,11 @@ export default function ImportWizard({
           background: true,
         });
         setStep('confirm');
+
+        // Auto-refresh contacts after a delay to pick up processed rows
+        if (refreshContacts) {
+          setTimeout(() => refreshContacts(), 5000);
+        }
       } catch (error) {
         console.error(error);
         showToast('Failed to upload bulk import file', 'error');
@@ -306,6 +313,11 @@ export default function ImportWizard({
     });
     setStep('confirm');
     setIsUploading(false);
+
+    // Refresh from API to get server-generated IDs
+    if (refreshContacts) {
+      refreshContacts();
+    }
   };
 
   // ---- Step index for wizard indicator ----
@@ -370,9 +382,9 @@ export default function ImportWizard({
               Added to segment <strong>{activeSegmentName}</strong>
             </p>
           )}
-          <button className="btn btn-primary" onClick={handleClose}>
+          <Button variant="primary" onClick={handleClose}>
             Done
-          </button>
+          </Button>
         </div>
       ) : (
         <>
@@ -429,9 +441,9 @@ export default function ImportWizard({
                 >
                   or click to browse
                 </p>
-                <button type="button" className="btn btn-secondary btn-sm">
+                <Button size="sm">
                   Browse Files
-                </button>
+                </Button>
               </div>
               <input
                 ref={fileInputRef}
@@ -509,7 +521,7 @@ export default function ImportWizard({
                         <span className="text-tertiary" style={{ fontSize: 'var(--text-xs)' }}>←</span>
                       </div>
                       <div className="import-mapping-cell">
-                        <FormSelect
+                        <Select
                           value={assignedHeader || ''}
                           onChange={(e) => {
                             // Unset the old assignment for this field
@@ -528,7 +540,7 @@ export default function ImportWizard({
                               {h} {mapping[h] && mapping[h] !== field.key ? '(mapped)' : ''}
                             </option>
                           ))}
-                        </FormSelect>
+                        </Select>
                       </div>
                       <div className="import-mapping-cell import-mapping-preview-col">
                         <span className="import-mapping-preview-val">{previewVal}</span>
@@ -539,19 +551,18 @@ export default function ImportWizard({
               </div>
 
               <div className="form-actions">
-                <button
-                  className="btn btn-secondary"
+                <Button
                   onClick={() => { setStep('upload'); resetFileState(); }}
                 >
                   ← Back
-                </button>
-                <button
-                  className="btn btn-primary"
+                </Button>
+                <Button
+                  variant="primary"
                   onClick={runPreview}
                   disabled={mappedFieldCount === 0}
                 >
                   Preview Data →
-                </button>
+                </Button>
               </div>
             </>
           )}
@@ -697,16 +708,16 @@ export default function ImportWizard({
               )}
 
               <div className="form-actions">
-                <button className="btn btn-secondary" onClick={() => setStep('map')} disabled={isUploading}>
+                <Button onClick={() => setStep('map')} disabled={isUploading}>
                   ← Back
-                </button>
-                <button 
-                  className="btn btn-primary" 
+                </Button>
+                <Button 
+                  variant="primary" 
                   disabled={!consentSource || importableContacts.length === 0 || isUploading}
                   onClick={handleImport}
                 >
                   {isUploading ? 'Uploading...' : `Import ${importableContacts.length} Contact${importableContacts.length !== 1 ? 's' : ''} →`}
-                </button>
+                </Button>
               </div>
 
               {/* Consent source selection (inline, before import) */}

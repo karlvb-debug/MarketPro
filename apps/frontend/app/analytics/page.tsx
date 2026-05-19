@@ -5,7 +5,7 @@ import PageHeader from '../components/PageHeader';
 import StatCard, { StatsGrid } from '../components/StatCard';
 import { MetricBar } from '../components/ProgressBar';
 import DataTable, { Card } from '../components/DataTable';
-import EmptyState from '../components/EmptyState';
+import { Button, EmptyState } from '../components/ui';
 
 export default function AnalyticsPage() {
   const { campaigns, hydrated } = useStore();
@@ -24,8 +24,8 @@ export default function AnalyticsPage() {
   return (
     <>
       <PageHeader title="Analytics" subtitle="Campaign performance across all channels">
-        <button className="btn btn-secondary btn-sm">Last 7 days ▾</button>
-        <button className="btn btn-secondary btn-sm">Export</button>
+        <Button size="sm">Last 7 days ▾</Button>
+        <Button size="sm">Export</Button>
       </PageHeader>
 
       <StatsGrid>

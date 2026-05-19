@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react';
 import { useStore, TemplateFolder, EmailTemplate, SmsTemplate, VoiceScript, WebForm } from '../lib/store';
-import { showToast } from './Toast';
+import { showToast } from './ui';
 import { useConfirm } from './ConfirmDialog';
 
 interface TemplateFolderPanelProps {

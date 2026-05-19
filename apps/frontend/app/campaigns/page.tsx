@@ -6,10 +6,7 @@ import PageHeader from '../components/PageHeader';
 import StatusBadge, { SegmentBadge, ChannelIcon } from '../components/StatusBadge';
 import DataTable from '../components/DataTable';
 import ProgressBar from '../components/ProgressBar';
-import EmptyState from '../components/EmptyState';
-import Modal from '../components/Modal';
-import { FormField, FormInput, FormSelect, RadioCard, FormActions } from '../components/FormElements';
-import { showToast } from '../components/Toast';
+import { Button, EmptyState, Modal, Field, Input, Select, RadioCard, showToast } from '../components/ui';
 
 export default function CampaignsPage() {
   const { campaigns, segments, templates, addCampaign, hydrated } = useStore();
@@ -40,7 +37,7 @@ export default function CampaignsPage() {
   return (
     <>
       <PageHeader title="Campaigns" subtitle="Manage your email, SMS, and voice campaigns">
-        <button className="btn btn-primary" onClick={() => setShowWizard(true)}>+ New Campaign</button>
+        <Button variant="primary" onClick={() => setShowWizard(true)}>+ New Campaign</Button>
       </PageHeader>
 
       <DataTable headers={['Campaign', 'Channel', 'Segment', 'Status', 'Delivery Progress', 'Recipients', 'Scheduled']}>
@@ -58,14 +55,14 @@ export default function CampaignsPage() {
         {campaigns.length === 0 && (
           <tr><td colSpan={7}>
             <EmptyState icon="▷" title="No campaigns yet" description="Create your first campaign to start reaching your audience.">
-              <button className="btn btn-primary" onClick={() => setShowWizard(true)}>+ New Campaign</button>
+              <Button variant="primary" onClick={() => setShowWizard(true)}>+ New Campaign</Button>
             </EmptyState>
           </td></tr>
         )}
       </DataTable>
 
       {/* NEW CAMPAIGN WIZARD */}
-      <Modal isOpen={showWizard} onClose={reset} title="Create New Campaign" width="620px">
+      <Modal isOpen={showWizard} onClose={reset} title="Create New Campaign" size="lg">
         {/* Step indicator */}
         <div className="wizard-steps">
           {['Channel', 'Details', 'Schedule'].map((label, i) => (
@@ -81,7 +78,7 @@ export default function CampaignsPage() {
 
         {step === 1 && (
           <>
-            <p className="text-secondary" style={{ fontSize: 'var(--text-sm)', marginBottom: 'var(--space-5)' }}>How do you want to reach your audience?</p>
+            <p className="text-secondary text-sm mb-5">How do you want to reach your audience?</p>
             <div className="form-grid-3">
               {[{ id: 'email', icon: '@', label: 'Email', desc: 'HTML newsletters & promos' }, { id: 'sms', icon: '#', label: 'SMS', desc: 'Text messages & alerts' }, { id: 'voice', icon: '☎', label: 'Voice', desc: 'Automated calls & IVR' }].map((ch) => (
                 <div key={ch.id} className={`channel-card ${channel === ch.id ? 'selected' : ''}`} onClick={() => setChannel(ch.id as typeof channel)}>
@@ -91,57 +88,57 @@ export default function CampaignsPage() {
                 </div>
               ))}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--space-6)' }}>
-              <button className="btn btn-primary" disabled={!channel} onClick={() => setStep(2)}>Continue →</button>
+            <div className="flex justify-end mt-6">
+              <Button variant="primary" disabled={!channel} onClick={() => setStep(2)}>Continue →</Button>
             </div>
           </>
         )}
 
         {step === 2 && (
           <>
-            <FormField label="Campaign Name" required><FormInput placeholder="e.g. Summer Sale Blast" required value={name} onChange={(e) => setName(e.target.value)} /></FormField>
-            <FormField label="Target Segment" required hint="All contacts in this segment will receive the campaign">
-              <FormSelect value={segmentId} onChange={(e) => setSegmentId(e.target.value)}>
+            <Field label="Campaign Name" required><Input placeholder="e.g. Summer Sale Blast" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
+            <Field label="Target Segment" required hint="All contacts in this segment will receive the campaign">
+              <Select value={segmentId} onChange={(e) => setSegmentId(e.target.value)}>
                 <option value="">Select a segment...</option>
                 {segments.map((s) => <option key={s.segmentId} value={s.segmentId}>{s.name} ({s.count} contacts)</option>)}
-              </FormSelect>
-            </FormField>
-            <FormField label="Template" hint={`Choose a ${channel} template to use`}>
-              <FormSelect value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+              </Select>
+            </Field>
+            <Field label="Template" hint={`Choose a ${channel} template to use`}>
+              <Select value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
                 <option value="">Select a template...</option>
                 {channel === 'email' && templates.email.map((t) => <option key={t.templateId} value={t.templateId}>{t.name}</option>)}
                 {channel === 'sms' && templates.sms.map((t) => <option key={t.templateId} value={t.templateId}>{t.name}</option>)}
                 {channel === 'voice' && templates.voice.map((t) => <option key={t.scriptId} value={t.scriptId}>{t.name}</option>)}
-              </FormSelect>
-            </FormField>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'var(--space-6)' }}>
-              <button className="btn btn-secondary" onClick={() => setStep(1)}>← Back</button>
-              <button className="btn btn-primary" disabled={!name || !segmentId} onClick={() => setStep(3)}>Continue →</button>
+              </Select>
+            </Field>
+            <div className="flex justify-between mt-6">
+              <Button onClick={() => setStep(1)}>← Back</Button>
+              <Button variant="primary" disabled={!name || !segmentId} onClick={() => setStep(3)}>Continue →</Button>
             </div>
           </>
         )}
 
         {step === 3 && (
           <>
-            <FormField label="When to Send" required>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+            <Field label="When to Send" required>
+              <div className="flex flex-col gap-3">
                 <RadioCard name="schedule" label="Save as Draft" description="Save now and send later when you're ready" checked={sendNow} onChange={() => setSendNow(true)} />
                 <RadioCard name="schedule" label="Schedule for later" description="Pick a date and time" checked={!sendNow} onChange={() => setSendNow(false)} />
               </div>
-            </FormField>
-            {!sendNow && <FormField label="Send Date & Time"><FormInput type="datetime-local" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} /></FormField>}
+            </Field>
+            {!sendNow && <Field label="Send Date & Time"><Input type="datetime-local" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} /></Field>}
             <div className="cost-estimate">
               <div className="flex items-center justify-between">
-                <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>Estimated Cost</span>
-                <span className="text-primary font-bold" style={{ fontSize: 'var(--text-lg)' }}>${estCost}</span>
+                <span className="text-secondary text-sm">Estimated Cost</span>
+                <span className="text-primary font-bold text-lg">${estCost}</span>
               </div>
-              <p className="text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 'var(--space-1)' }}>
+              <p className="text-tertiary text-xs mt-1">
                 {selectedSeg?.count || 0} recipients × ${costPerMsg[channel] || 0}/msg
               </p>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'var(--space-6)' }}>
-              <button className="btn btn-secondary" onClick={() => setStep(2)}>← Back</button>
-              <button className="btn btn-primary" onClick={handleCreate}>Create Campaign</button>
+            <div className="flex justify-between mt-6">
+              <Button onClick={() => setStep(2)}>← Back</Button>
+              <Button variant="primary" onClick={handleCreate}>Create Campaign</Button>
             </div>
           </>
         )}

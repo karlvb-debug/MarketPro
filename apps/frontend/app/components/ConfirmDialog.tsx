@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, createContext, useContext, ReactNode } from 'react';
+import { Button } from './ui';
 
 // ============================================
 // Custom Confirm Dialog — replaces browser confirm()
@@ -63,16 +64,17 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
               <p className="confirm-message">{state.message}</p>
             </div>
             <div className="confirm-actions">
-              <button className="btn btn-secondary btn-sm" onClick={handleCancel} autoFocus={!isDanger}>
+              <Button size="sm" onClick={handleCancel} autoFocus={!isDanger}>
                 {cancelLabel || 'Cancel'}
-              </button>
-              <button
-                className={`btn btn-sm ${isDanger ? 'btn-danger' : 'btn-primary'}`}
+              </Button>
+              <Button
+                size="sm"
+                variant={isDanger ? 'danger' : 'primary'}
                 onClick={handleConfirm}
                 autoFocus={isDanger}
               >
                 {confirmLabel || (isDanger ? 'Delete' : 'Confirm')}
-              </button>
+              </Button>
             </div>
           </div>
         </>

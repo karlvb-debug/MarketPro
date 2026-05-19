@@ -240,7 +240,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         })
         .returning();
 
-      return respond(row ? 200 : 201, row);
+      return respond(201, row);
     }
 
     // PUT /contacts/{id}
@@ -257,14 +257,17 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       if (body.last_name ?? body.lastName) updates.lastName = body.last_name || body.lastName;
       if (body.company !== undefined) updates.company = body.company;
       if (body.timezone !== undefined) updates.timezone = body.timezone;
+      if (body.state !== undefined) updates.state = body.state;
       if (body.status !== undefined) updates.status = body.status;
+      if (body.consent_source ?? body.consentSource) updates.consentSource = body.consent_source || body.consentSource;
       if (body.custom_fields ?? body.customFields) updates.customFields = body.custom_fields || body.customFields;
 
-      await db.update(contacts).set(updates).where(
+      const [row] = await db.update(contacts).set(updates).where(
         and(eq(contacts.contactId, pathId), eq(contacts.workspaceId, workspaceId))
-      );
+      ).returning();
 
-      return respond(200, { message: 'Updated' });
+      if (!row) return respond(404, { message: 'Contact not found' });
+      return respond(200, row);
     }
 
     // DELETE /contacts/{id} — single delete

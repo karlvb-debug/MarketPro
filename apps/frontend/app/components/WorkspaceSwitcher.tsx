@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useWorkspace } from '../lib/workspace';
-import { showToast } from './Toast';
+import { Button, showToast } from './ui';
 
 export default function WorkspaceSwitcher() {
   const { workspaces, activeWorkspace, switchWorkspace, createWorkspace, hydrated } = useWorkspace();
@@ -82,8 +82,8 @@ export default function WorkspaceSwitcher() {
                 autoFocus
               />
               <div className="ws-create-actions">
-                <button className="btn btn-ghost btn-sm" onClick={() => { setShowCreate(false); setNewName(''); }}>Cancel</button>
-                <button className="btn btn-primary btn-sm" onClick={handleCreate} disabled={!newName.trim()}>Create</button>
+                <Button variant="ghost" size="sm" onClick={() => { setShowCreate(false); setNewName(''); }}>Cancel</Button>
+                <Button variant="primary" size="sm" onClick={handleCreate} disabled={!newName.trim()}>Create</Button>
               </div>
             </div>
           ) : (

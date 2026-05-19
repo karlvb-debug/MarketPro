@@ -1,13 +1,10 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useStore, Contact, SuppressionReason, getOverallStatus } from '../lib/store';
 import Toolbar from '../components/Toolbar';
 import DataTable from '../components/DataTable';
-import EmptyState from '../components/EmptyState';
-import Modal from '../components/Modal';
-import { FormField, FormInput, FormSelect, FormActions, CheckboxChip } from '../components/FormElements';
-import { showToast } from '../components/Toast';
+import { Button, EmptyState, Modal, Field, Input, Select, Checkbox, FormActions, showToast } from '../components/ui';
 import { useConfirm } from '../components/ConfirmDialog';
 import ContactCard from '../components/ContactCard';
 import SegmentPanel from '../components/SegmentPanel';
@@ -18,6 +15,7 @@ export default function ContactsPage() {
   const {
     contacts, segments, settings, addContact, updateContact, updateCompliance, deleteContact,
     importContacts, bulkDeleteContacts, addContactsToSegment, removeContactsFromSegment, hydrated,
+    refreshContacts,
   } = useStore();
   const confirm = useConfirm();
 
@@ -30,6 +28,8 @@ export default function ContactsPage() {
   const [search, setSearch] = useState('');
   const [panelOpen, setPanelOpen] = useState(true);
   const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '', company: '', timezone: '', segments: [] as string[] });
+  const [showBulkEditModal, setShowBulkEditModal] = useState(false);
+  const [bulkEditData, setBulkEditData] = useState({ company: '', state: '', timezone: '' });
 
   // ---- FILTERS ----
   interface ActiveFilter {
@@ -40,6 +40,83 @@ export default function ContactsPage() {
   }
   const [filters, setFilters] = useState<ActiveFilter[]>([]);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
+
+  // ---- SAVED VIEWS ----
+  interface SavedView {
+    id: string;
+    name: string;
+    filters: ActiveFilter[];
+    segmentId: string | null;
+  }
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const [showSaveViewInput, setShowSaveViewInput] = useState(false);
+  const [newViewName, setNewViewName] = useState('');
+
+  // Load saved views from localStorage
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('cliquey_saved_views');
+      if (stored) setSavedViews(JSON.parse(stored));
+    } catch { /* ignore */ }
+  }, []);
+
+  const persistViews = (views: SavedView[]) => {
+    setSavedViews(views);
+    localStorage.setItem('cliquey_saved_views', JSON.stringify(views));
+  };
+
+  const saveCurrentView = () => {
+    if (!newViewName.trim()) return;
+    const view: SavedView = {
+      id: crypto.randomUUID(),
+      name: newViewName.trim(),
+      filters: filters.map(({ id, ...rest }) => ({ ...rest, id: crypto.randomUUID() })),
+      segmentId: activeSegmentId,
+    };
+    persistViews([...savedViews, view]);
+    setActiveViewId(view.id);
+    setNewViewName('');
+    setShowSaveViewInput(false);
+    showToast(`View "${view.name}" saved`);
+  };
+
+  const loadView = (view: SavedView) => {
+    setFilters(view.filters.map((f) => ({ ...f, id: crypto.randomUUID() })));
+    setActiveSegmentId(view.segmentId);
+    setActiveViewId(view.id);
+    setSearch('');
+  };
+
+  const deleteView = (viewId: string) => {
+    persistViews(savedViews.filter((v) => v.id !== viewId));
+    if (activeViewId === viewId) setActiveViewId(null);
+  };
+
+  // Quick-filter presets
+  const PRESETS = useMemo(() => [
+    { label: 'Active', icon: '●', apply: () => {
+      setFilters([{ id: crypto.randomUUID(), field: 'status', operator: 'equals' as const, value: 'active' }]);
+      setActiveViewId(null);
+    }},
+    { label: 'Suppressed', icon: '⊘', apply: () => {
+      setFilters([{ id: crypto.randomUUID(), field: 'status', operator: 'equals' as const, value: 'suppressed' }]);
+      setActiveViewId(null);
+    }},
+    { label: 'No Email', icon: '@', apply: () => {
+      setFilters([{ id: crypto.randomUUID(), field: 'email', operator: 'is_empty' as const, value: '' }]);
+      setActiveViewId(null);
+    }},
+    { label: 'No Phone', icon: '#', apply: () => {
+      setFilters([{ id: crypto.randomUUID(), field: 'phone', operator: 'is_empty' as const, value: '' }]);
+      setActiveViewId(null);
+    }},
+    { label: 'No Segment', icon: '◫', apply: () => {
+      setFilters([{ id: crypto.randomUUID(), field: 'segments', operator: 'is_empty' as const, value: '' }]);
+      setActiveSegmentId(null);
+      setActiveViewId(null);
+    }},
+  ], []);
 
   const filterableFields = useMemo(() => {
     const system = [
@@ -142,7 +219,7 @@ export default function ContactsPage() {
   };
 
   // Handlers
-  const handleAddContact = (e: React.FormEvent) => {
+  const handleAddContact = async (e: React.FormEvent) => {
     e.preventDefault();
     if (form.phone) {
       const result = validatePhone(form.phone);
@@ -151,7 +228,7 @@ export default function ContactsPage() {
     }
     const segs = activeSegment && !form.segments.includes(activeSegment.name)
       ? [...form.segments, activeSegment.name] : form.segments;
-    const error = addContact({ ...form, segments: segs, source: 'manual' });
+    const error = await addContact({ ...form, segments: segs, source: 'manual' });
     if (error) { showToast(error, 'error'); return; }
     showToast(`Contact ${form.firstName} ${form.lastName} added`);
     setForm({ firstName: '', lastName: '', email: '', phone: '', company: '', timezone: '', segments: [] });
@@ -180,7 +257,60 @@ export default function ContactsPage() {
     }));
   };
 
-  if (!hydrated) return null;
+  // ---- EXPORT CSV ----
+  const exportCsv = useCallback(() => {
+    const rows = selectedIds.size > 0
+      ? displayContacts.filter((c) => selectedIds.has(c.contactId))
+      : displayContacts;
+    if (rows.length === 0) { showToast('No contacts to export', 'error'); return; }
+
+    const headers = ['First Name', 'Last Name', 'Email', 'Phone', 'Company', 'State', 'Timezone', 'Source', 'Segments', 'Created'];
+    const csvLines = [
+      headers.join(','),
+      ...rows.map((c) => [
+        c.firstName, c.lastName, c.email, c.phone, c.company || '', c.state || '',
+        c.timezone || '', c.source || '', (c.segments || []).join(';'),
+        new Date(c.createdAt).toISOString(),
+      ].map((v) => `"${(v || '').replace(/"/g, '""')}"`).join(',')),
+    ];
+    const blob = new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `contacts_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(`Exported ${rows.length} contacts`);
+  }, [displayContacts, selectedIds]);
+
+  // ---- BULK EDIT ----
+  const handleBulkEdit = () => {
+    const ids = Array.from(selectedIds);
+    const patch: Partial<Contact> = {};
+    if (bulkEditData.company.trim()) patch.company = bulkEditData.company.trim();
+    if (bulkEditData.state.trim()) patch.state = bulkEditData.state.trim().toUpperCase().slice(0, 2);
+    if (bulkEditData.timezone.trim()) patch.timezone = bulkEditData.timezone.trim();
+    if (Object.keys(patch).length === 0) { showToast('No fields to update', 'error'); return; }
+    for (const id of ids) {
+      updateContact(id, patch);
+    }
+    showToast(`Updated ${ids.length} contacts`);
+    setBulkEditData({ company: '', state: '', timezone: '' });
+    setShowBulkEditModal(false);
+    setSelectedIds(new Set());
+  };
+
+  if (!hydrated) return (
+    <div className="contacts-layout">
+      <div className="contacts-content" style={{ padding: 'var(--space-6)' }}>
+        <div className="skeleton-bar" style={{ width: 200, height: 28, marginBottom: 'var(--space-4)' }} />
+        <div className="skeleton-bar" style={{ width: '100%', height: 40, marginBottom: 'var(--space-3)' }} />
+        {[...Array(6)].map((_, i) => (
+          <div key={i} className="skeleton-bar" style={{ width: '100%', height: 36, marginBottom: 'var(--space-2)' }} />
+        ))}
+      </div>
+    </div>
+  );
 
   const viewTitle = activeSegment ? activeSegment.name : 'All Contacts';
   const viewCount = displayContacts.length;
@@ -206,32 +336,42 @@ export default function ContactsPage() {
             panelOpen={panelOpen}
             actions={
               <>
-                <button
-                  className={`btn btn-sm ${filters.length > 0 ? 'btn-primary' : 'btn-secondary'}`}
+                <Button
+                  size="sm"
+                  variant={filters.length > 0 ? 'primary' : 'secondary'}
                   onClick={() => setShowFilterMenu(!showFilterMenu)}
                 >
                   ⧩ Filter{filters.length > 0 ? ` (${filters.length})` : ''}
-                </button>
-                <button className="btn btn-secondary btn-sm" onClick={() => setShowImportModal(true)}>
+                </Button>
+                <Button size="sm" onClick={exportCsv} title="Export contacts as CSV">
+                  ↓ Export
+                </Button>
+                <Button size="sm" onClick={() => setShowImportModal(true)}>
                   Import CSV / Excel
-                </button>
-                <button className="btn btn-primary btn-sm" onClick={() => setShowAddModal(true)}>
+                </Button>
+                <Button variant="primary" size="sm" onClick={() => setShowAddModal(true)}>
                   + Add Contact
-                </button>
+                </Button>
               </>
             }
             bulkBar={selectedIds.size > 0 ? (
               <>
                 <span className="text-sm text-secondary">{selectedIds.size} selected</span>
-                <button className="btn btn-secondary btn-xs" onClick={() => setShowBulkSegmentModal(true)}>
+                <Button size="xs" onClick={() => setShowBulkSegmentModal(true)}>
                   Add to Segment
-                </button>
+                </Button>
+                <Button size="xs" onClick={() => { setShowBulkEditModal(true); setBulkEditData({ company: '', state: '', timezone: '' }); }}>
+                  ✏ Edit
+                </Button>
+                <Button size="xs" onClick={exportCsv}>
+                  ↓ Export Selected
+                </Button>
                 {activeSegment && (
-                  <button className="btn btn-secondary btn-xs" onClick={handleBulkRemoveFromSegment}>
+                  <Button size="xs" onClick={handleBulkRemoveFromSegment}>
                     Remove from {activeSegment.name}
-                  </button>
+                  </Button>
                 )}
-                <button className="btn btn-danger btn-xs" onClick={async () => {
+                <Button variant="danger" size="xs" onClick={async () => {
                   const ok = await confirm(
                     `Permanently delete ${selectedIds.size} contact${selectedIds.size !== 1 ? 's' : ''}? This cannot be undone.`,
                     { title: 'Delete Contacts', variant: 'danger', confirmLabel: `Delete ${selectedIds.size}` }
@@ -244,7 +384,7 @@ export default function ContactsPage() {
                   }
                 }}>
                   🗑 Delete {selectedIds.size}
-                </button>
+                </Button>
               </>
             ) : undefined}
           />
@@ -295,6 +435,61 @@ export default function ContactsPage() {
               {filters.length > 0 && (
                 <button className="filter-clear-btn" onClick={clearFilters}>Clear All</button>
               )}
+              {filters.length > 0 && (
+                <button
+                  className="filter-save-btn"
+                  onClick={() => setShowSaveViewInput(true)}
+                  title="Save as view"
+                >💾 Save View</button>
+              )}
+            </div>
+          )}
+
+          {/* Quick-filter presets + saved views */}
+          {(savedViews.length > 0 || filters.length === 0) && (
+            <div className="filter-presets-bar">
+              <div className="filter-presets">
+                {PRESETS.map((p) => (
+                  <button
+                    key={p.label}
+                    className="filter-preset-btn"
+                    onClick={p.apply}
+                    title={p.label}
+                  >
+                    <span className="filter-preset-icon">{p.icon}</span>
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              {savedViews.length > 0 && (
+                <div className="saved-views">
+                  <span className="saved-views-label">Views:</span>
+                  {savedViews.map((v) => (
+                    <div key={v.id} className={`saved-view-chip ${activeViewId === v.id ? 'saved-view-active' : ''}`}>
+                      <button className="saved-view-name" onClick={() => loadView(v)}>{v.name}</button>
+                      <button className="saved-view-delete" onClick={() => deleteView(v.id)} title="Delete view">×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Save view input */}
+          {showSaveViewInput && (
+            <div className="filter-bar" style={{ gap: 'var(--space-2)' }}>
+              <input
+                className="filter-chip-value"
+                type="text"
+                placeholder="View name..."
+                value={newViewName}
+                onChange={(e) => setNewViewName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') saveCurrentView(); if (e.key === 'Escape') setShowSaveViewInput(false); }}
+                autoFocus
+                style={{ flex: '1', minWidth: 120 }}
+              />
+              <Button size="xs" variant="primary" onClick={saveCurrentView} disabled={!newViewName.trim()}>Save</Button>
+              <Button size="xs" onClick={() => setShowSaveViewInput(false)}>Cancel</Button>
             </div>
           )}
 
@@ -305,9 +500,9 @@ export default function ContactsPage() {
               description={search ? 'Try a different search term or clear your filters.' : 'Add your first contact or import a CSV or Excel file to get started.'}
             >
               {!search && (
-                <button className="btn btn-primary btn-sm" onClick={() => setShowAddModal(true)}>
+                <Button variant="primary" size="sm" onClick={() => setShowAddModal(true)}>
                   + Add Contact
-                </button>
+                </Button>
               )}
             </EmptyState>
           ) : (
@@ -347,7 +542,7 @@ export default function ContactsPage() {
                   <td className="text-secondary hide-mobile">{c.phone || '—'}</td>
                   <td className="text-secondary hide-mobile">{c.company || '—'}</td>
                   <td className="hide-mobile">
-                    <div className="flex gap-1" style={{ flexWrap: 'wrap' }}>
+                    <div className="flex gap-1 flex-wrap">
                       {c.segments.map((s) => <span key={s} className="badge badge-subtle">{s}</span>)}
                     </div>
                   </td>
@@ -384,6 +579,15 @@ export default function ContactsPage() {
                 return { ...prev, compliance };
               });
             }}
+            segments={segments}
+            onAddToSegment={(ids, segName) => {
+              addContactsToSegment(ids, segName);
+              setSelectedContact((prev) => prev ? { ...prev, segments: [...prev.segments, segName] } : prev);
+            }}
+            onRemoveFromSegment={(ids, segName) => {
+              removeContactsFromSegment(ids, segName);
+              setSelectedContact((prev) => prev ? { ...prev, segments: prev.segments.filter((s) => s !== segName) } : prev);
+            }}
           />
         )}
       </div>
@@ -392,34 +596,34 @@ export default function ContactsPage() {
       <Modal isOpen={showAddModal} onClose={() => setShowAddModal(false)} title="Add New Contact">
         <form onSubmit={handleAddContact}>
           <div className="form-grid-2">
-            <FormField label="First Name" required><FormInput placeholder="Sarah" required value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></FormField>
-            <FormField label="Last Name" required><FormInput placeholder="Chen" required value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></FormField>
+            <Field label="First Name" required><Input placeholder="Sarah" required value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></Field>
+            <Field label="Last Name" required><Input placeholder="Chen" required value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></Field>
           </div>
-          <FormField label="Email Address"><FormInput type="email" placeholder="sarah@example.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></FormField>
-          <FormField label="Phone Number"><FormInput type="tel" inputMode="tel" pattern="[\+\d\s\-\(\)]{7,}" placeholder="+15551234567" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></FormField>
-          <FormField label="Company"><FormInput placeholder="Acme Corp" value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} /></FormField>
-          <FormField label="Timezone">
-            <FormSelect value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })}>
+          <Field label="Email Address"><Input type="email" placeholder="sarah@example.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
+          <Field label="Phone Number"><Input type="tel" inputMode="tel" pattern="[\+\d\s\-\(\)]{7,}" placeholder="+15551234567" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
+          <Field label="Company"><Input placeholder="Acme Corp" value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} /></Field>
+          <Field label="Timezone">
+            <Select value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })}>
               <option value="">Auto-detect from area code</option>
               <option value="America/New_York">Eastern (ET)</option>
               <option value="America/Chicago">Central (CT)</option>
               <option value="America/Denver">Mountain (MT)</option>
               <option value="America/Los_Angeles">Pacific (PT)</option>
-            </FormSelect>
-          </FormField>
-          <FormField label="Segments">
-            <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
-              {segments.map((seg) => <CheckboxChip key={seg.segmentId} label={seg.name} checked={form.segments.includes(seg.name)} onChange={() => toggleFormSegment(seg.name)} />)}
+            </Select>
+          </Field>
+          <Field label="Segments">
+            <div className="flex gap-2 flex-wrap">
+              {segments.map((seg) => <Checkbox key={seg.segmentId} label={seg.name} checked={form.segments.includes(seg.name)} onChange={() => toggleFormSegment(seg.name)} />)}
             </div>
-          </FormField>
+          </Field>
           {activeSegment && !form.segments.includes(activeSegment.name) && (
-            <div className="info-box mb-4" style={{ fontSize: 'var(--text-xs)' }}>
+            <div className="info-box mb-4 text-xs" >
               This contact will also be added to <strong>{activeSegment.name}</strong> since you&apos;re viewing that segment.
             </div>
           )}
           <FormActions>
-            <button type="button" className="btn btn-secondary" onClick={() => setShowAddModal(false)}>Cancel</button>
-            <button type="submit" className="btn btn-primary">Add Contact</button>
+            <Button onClick={() => setShowAddModal(false)}>Cancel</Button>
+            <Button variant="primary" type="submit">Add Contact</Button>
           </FormActions>
         </form>
       </Modal>
@@ -430,26 +634,66 @@ export default function ContactsPage() {
         onClose={() => setShowImportModal(false)}
         activeSegmentName={activeSegment?.name}
         importContacts={importContacts}
+        refreshContacts={refreshContacts}
       />
 
       {/* ===== BULK ADD TO SEGMENT MODAL ===== */}
       <Modal isOpen={showBulkSegmentModal} onClose={() => setShowBulkSegmentModal(false)} title="Add to Segment" width="400px">
-        <p className="text-secondary mb-5" style={{ fontSize: 'var(--text-sm)' }}>
+        <p className="text-secondary mb-5 text-sm" >
           Choose a segment to add {selectedIds.size} selected contact{selectedIds.size > 1 ? 's' : ''} to:
         </p>
         <div className="segment-pick-list">
           {segments.map((seg) => (
             <button key={seg.segmentId} className="segment-pick-item" onClick={() => handleBulkAddToSegment(seg.name)}>
               <span>{seg.name}</span>
-              <span className="text-tertiary" style={{ fontSize: 'var(--text-xs)' }}>{seg.count} contacts</span>
+              <span className="text-tertiary text-xs" >{seg.count} contacts</span>
             </button>
           ))}
           {segments.length === 0 && (
-            <p className="text-tertiary" style={{ fontSize: 'var(--text-sm)', textAlign: 'center', padding: 'var(--space-6)' }}>
+            <p className="text-tertiary text-sm text-center p-6">
               No segments yet. Create one from the panel on the left.
             </p>
           )}
         </div>
+      </Modal>
+
+      {/* ===== BULK EDIT MODAL ===== */}
+      <Modal isOpen={showBulkEditModal} onClose={() => setShowBulkEditModal(false)} title={`Edit ${selectedIds.size} Contact${selectedIds.size > 1 ? 's' : ''}`} width="420px">
+        <p className="text-secondary mb-5 text-sm">
+          Only non-empty fields will be updated. Leave blank to skip a field.
+        </p>
+        <Field label="Company">
+          <Input
+            placeholder="Set company for all selected..."
+            value={bulkEditData.company}
+            onChange={(e) => setBulkEditData({ ...bulkEditData, company: e.target.value })}
+          />
+        </Field>
+        <Field label="State">
+          <Input
+            placeholder="e.g. CA, FL, TX"
+            value={bulkEditData.state}
+            onChange={(e) => setBulkEditData({ ...bulkEditData, state: e.target.value.toUpperCase().slice(0, 2) })}
+            style={{ textTransform: 'uppercase', maxWidth: 80 }}
+          />
+        </Field>
+        <Field label="Timezone">
+          <Select value={bulkEditData.timezone} onChange={(e) => setBulkEditData({ ...bulkEditData, timezone: e.target.value })}>
+            <option value="">— Don&apos;t change —</option>
+            <option value="America/New_York">Eastern (ET)</option>
+            <option value="America/Chicago">Central (CT)</option>
+            <option value="America/Denver">Mountain (MT)</option>
+            <option value="America/Los_Angeles">Pacific (PT)</option>
+            <option value="America/Anchorage">Alaska (AKT)</option>
+            <option value="Pacific/Honolulu">Hawaii (HST)</option>
+          </Select>
+        </Field>
+        <FormActions>
+          <Button onClick={() => setShowBulkEditModal(false)}>Cancel</Button>
+          <Button variant="primary" onClick={handleBulkEdit}>
+            Update {selectedIds.size} Contact{selectedIds.size > 1 ? 's' : ''}
+          </Button>
+        </FormActions>
       </Modal>
     </>
   );

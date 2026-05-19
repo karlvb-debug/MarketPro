@@ -4,10 +4,7 @@ import { useState, useMemo } from 'react';
 import { useStore } from '../lib/store';
 import Toolbar from '../components/Toolbar';
 import TemplateFolderPanel from '../components/TemplateFolderPanel';
-import EmptyState from '../components/EmptyState';
-import Modal from '../components/Modal';
-import { FormField, FormInput, FormTextarea, FormActions } from '../components/FormElements';
-import { showToast } from '../components/Toast';
+import { Button, EmptyState, Modal, Field, Input, Textarea, FormActions, showToast } from '../components/ui';
 import { useConfirm } from '../components/ConfirmDialog';
 
 type ContentType = 'email' | 'sms' | 'voice' | 'webform';
@@ -178,9 +175,9 @@ export default function TemplatesPage() {
               </div>
             }
             actions={
-              <button className="btn btn-primary btn-sm" onClick={handleNewClick}>
+              <Button variant="primary" size="sm" onClick={handleNewClick}>
                 + New {labels.singular}
-              </button>
+              </Button>
             }
           />
 
@@ -191,9 +188,9 @@ export default function TemplatesPage() {
               title={search ? `No matching ${labels.plural.toLowerCase()}` : `No ${labels.plural.toLowerCase()}${activeFolder ? ` in "${activeFolder.name}"` : ''}`}
               description={search ? 'Try a different search term.' : `Create your first ${labels.singular.toLowerCase()}.`}
             >
-              <button className="btn btn-primary" onClick={handleNewClick}>
+              <Button variant="primary" onClick={handleNewClick}>
                 + New {labels.singular}
-              </button>
+              </Button>
             </EmptyState>
           ) : (
             <div className="table-wrapper">
@@ -247,7 +244,7 @@ export default function TemplatesPage() {
                             <span className="text-tertiary">—</span>
                           )}
                         </td>
-                        <td className="text-tertiary" style={{ fontSize: 'var(--text-xs)' }}>
+                        <td className="text-tertiary text-xs" >
                           {item.updatedAt
                             ? new Date(item.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                             : '—'}
@@ -257,7 +254,7 @@ export default function TemplatesPage() {
                             {activeType === 'email' && (
                               <a href={`/email-builder?templateId=${id}`} className="btn btn-secondary btn-sm">Edit</a>
                             )}
-                            <button className="btn btn-ghost btn-sm" onClick={() => handleDeleteItem(id)}>✕</button>
+                            <Button variant="ghost" size="sm" onClick={() => handleDeleteItem(id)}>✕</Button>
                           </div>
                         </td>
                       </tr>
@@ -274,7 +271,7 @@ export default function TemplatesPage() {
           <div className="tpl-preview-drawer">
             <div className="tpl-preview-header">
               <h3 className="tpl-preview-title">{previewItem.name}</h3>
-              <button className="btn btn-ghost btn-sm" onClick={() => setPreviewId(null)}>✕</button>
+              <Button variant="ghost" size="sm" onClick={() => setPreviewId(null)}>✕</Button>
             </div>
             <div className="tpl-preview-body">
               {activeType === 'email' && (
@@ -294,7 +291,7 @@ export default function TemplatesPage() {
                     </div>
                   )}
                   <div className="tpl-preview-actions">
-                    <a href={`/email-builder?templateId=${getTplId(previewItem)}`} className="btn btn-primary btn-sm" style={{ width: '100%' }}>Open in Editor</a>
+                    <a href={`/email-builder?templateId=${getTplId(previewItem)}`} className="btn btn-primary btn-sm w-full">Open in Editor</a>
                   </div>
                 </>
               )}
@@ -304,7 +301,7 @@ export default function TemplatesPage() {
                     <span className="tpl-preview-label">Message</span>
                   </div>
                   <div className="tpl-preview-sms-body">{previewItem.body}</div>
-                  <div className="tpl-preview-field" style={{ marginTop: 'var(--space-3)' }}>
+                  <div className="tpl-preview-field mt-3">
                     <span className="tpl-preview-label">Segments</span>
                     <span className="tpl-preview-value">{previewItem.estimatedSegments} SMS segment{previewItem.estimatedSegments > 1 ? 's' : ''}</span>
                   </div>
@@ -325,7 +322,7 @@ export default function TemplatesPage() {
                     <span className="tpl-preview-value">{new Date(previewItem.updatedAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
                   </div>
                   <div className="tpl-preview-actions">
-                    <button className="btn btn-secondary btn-sm" style={{ width: '100%' }}>▶ Preview Voice</button>
+                    <Button size="sm" className="w-full">▶ Preview Voice</Button>
                   </div>
                 </>
               )}
@@ -342,11 +339,11 @@ export default function TemplatesPage() {
                     {(previewItem.fields || []).map((f: any) => (
                       <div key={f.fieldId} className="tpl-preview-form-field-item">
                         <span>{f.label}</span>
-                        <span className="text-tertiary" style={{ fontSize: 'var(--text-xs)' }}>{f.type}{f.required ? ' •' : ''}</span>
+                        <span className="text-tertiary text-xs" >{f.type}{f.required ? ' •' : ''}</span>
                       </div>
                     ))}
                   </div>
-                  <div className="tpl-preview-field" style={{ marginTop: 'var(--space-3)' }}>
+                  <div className="tpl-preview-field mt-3">
                     <span className="tpl-preview-label">Submit Button</span>
                     <span className="tpl-preview-value">{previewItem.submitLabel}</span>
                   </div>
@@ -355,7 +352,7 @@ export default function TemplatesPage() {
                     <span className="tpl-preview-value">{new Date(previewItem.updatedAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
                   </div>
                   <div className="tpl-preview-actions">
-                    <a href={`/email-builder?formId=${previewItem.formId}&mode=form`} className="btn btn-primary btn-sm" style={{ width: '100%' }}>Edit in Form Builder</a>
+                    <a href={`/email-builder?formId=${previewItem.formId}&mode=form`} className="btn btn-primary btn-sm w-full">Edit in Form Builder</a>
                   </div>
                 </>
               )}
@@ -367,15 +364,15 @@ export default function TemplatesPage() {
       {/* ===== NEW EMAIL MODAL ===== */}
       <Modal isOpen={showNewEmail} onClose={() => setShowNewEmail(false)} title="New Email">
         <form onSubmit={handleAddEmail}>
-          <FormField label="Name" required>
-            <FormInput placeholder="e.g. Welcome Series — Day 1" required value={emailName} onChange={(e) => setEmailName(e.target.value)} />
-          </FormField>
-          <FormField label="Subject Line" required>
-            <FormInput placeholder="e.g. Welcome to {{company}}!" required value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} />
-          </FormField>
+          <Field label="Name" required>
+            <Input placeholder="e.g. Welcome Series — Day 1" required value={emailName} onChange={(e) => setEmailName(e.target.value)} />
+          </Field>
+          <Field label="Subject Line" required>
+            <Input placeholder="e.g. Welcome to {{company}}!" required value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} />
+          </Field>
           <FormActions>
-            <button type="button" className="btn btn-secondary" onClick={() => setShowNewEmail(false)}>Cancel</button>
-            <button type="submit" className="btn btn-primary">Create & Open Editor</button>
+            <Button onClick={() => setShowNewEmail(false)}>Cancel</Button>
+            <Button variant="primary" type="submit">Create & Open Editor</Button>
           </FormActions>
         </form>
       </Modal>
@@ -383,18 +380,18 @@ export default function TemplatesPage() {
       {/* ===== NEW SMS MODAL ===== */}
       <Modal isOpen={showNewSms} onClose={() => setShowNewSms(false)} title="New SMS Message">
         <form onSubmit={handleAddSms}>
-          <FormField label="Name" required>
-            <FormInput placeholder="e.g. Appointment Reminder" required value={smsName} onChange={(e) => setSmsName(e.target.value)} />
-          </FormField>
-          <FormField label="Message Body" required hint={`${smsBody.length}/160 characters · ${Math.ceil(smsBody.length / 160) || 1} SMS segment(s)`}>
-            <FormTextarea placeholder="Hi {{first_name}}, this is a reminder..." required value={smsBody} onChange={(e) => setSmsBody(e.target.value)} style={{ minHeight: '120px' }} />
-          </FormField>
-          <div className="info-box" style={{ marginBottom: 'var(--space-5)', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
+          <Field label="Name" required>
+            <Input placeholder="e.g. Appointment Reminder" required value={smsName} onChange={(e) => setSmsName(e.target.value)} />
+          </Field>
+          <Field label="Message Body" required hint={`${smsBody.length}/160 characters · ${Math.ceil(smsBody.length / 160) || 1} SMS segment(s)`}>
+            <Textarea placeholder="Hi {{first_name}}, this is a reminder..." required value={smsBody} onChange={(e) => setSmsBody(e.target.value)} style={{ minHeight: '120px' }} />
+          </Field>
+          <div className="info-box mb-5 text-xs text-tertiary">
             <strong>Merge tags:</strong> Use {'{{first_name}}'}, {'{{last_name}}'}, {'{{company}}'}, {'{{link}}'} for personalization.
           </div>
           <FormActions>
-            <button type="button" className="btn btn-secondary" onClick={() => setShowNewSms(false)}>Cancel</button>
-            <button type="submit" className="btn btn-primary">Save Message</button>
+            <Button onClick={() => setShowNewSms(false)}>Cancel</Button>
+            <Button variant="primary" type="submit">Save Message</Button>
           </FormActions>
         </form>
       </Modal>
@@ -402,26 +399,26 @@ export default function TemplatesPage() {
       {/* ===== NEW VOICE MODAL ===== */}
       <Modal isOpen={showNewVoice} onClose={() => setShowNewVoice(false)} title="New Voice Call Script">
         <form onSubmit={handleAddVoice}>
-          <FormField label="Name" required>
-            <FormInput placeholder="e.g. Payment Reminder" required value={voiceName} onChange={(e) => setVoiceName(e.target.value)} />
-          </FormField>
-          <FormField label="Voice Personality" required>
+          <Field label="Name" required>
+            <Input placeholder="e.g. Payment Reminder" required value={voiceName} onChange={(e) => setVoiceName(e.target.value)} />
+          </Field>
+          <Field label="Voice Personality" required>
             <select className="eb-settings-input" value={voiceId} onChange={(e) => setVoiceId(e.target.value)} required>
               <option value="Joanna">Joanna (US English, Female)</option>
               <option value="Matthew">Matthew (US English, Male)</option>
               <option value="Salli">Salli (US English, Female)</option>
               <option value="Joey">Joey (US English, Male)</option>
             </select>
-          </FormField>
-          <FormField label="SSML Content" required hint="Use SSML to control pronunciation and pacing">
-            <FormTextarea placeholder="<speak>Hello {{first_name}}...</speak>" required value={voiceSsml} onChange={(e) => setVoiceSsml(e.target.value)} style={{ minHeight: '120px', fontFamily: 'monospace' }} />
-          </FormField>
-          <div className="info-box" style={{ marginBottom: 'var(--space-5)', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
+          </Field>
+          <Field label="SSML Content" required hint="Use SSML to control pronunciation and pacing">
+            <Textarea placeholder="<speak>Hello {{first_name}}...</speak>" required value={voiceSsml} onChange={(e) => setVoiceSsml(e.target.value)} style={{ minHeight: '120px', fontFamily: 'monospace' }} />
+          </Field>
+          <div className="info-box mb-5 text-xs text-tertiary">
             <strong>Merge tags:</strong> Use {'{{first_name}}'}, {'{{last_name}}'}, {'{{company}}'}. Must wrap message in {'<speak>'} tags.
           </div>
           <FormActions>
-            <button type="button" className="btn btn-secondary" onClick={() => setShowNewVoice(false)}>Cancel</button>
-            <button type="submit" className="btn btn-primary">Save Script</button>
+            <Button onClick={() => setShowNewVoice(false)}>Cancel</Button>
+            <Button variant="primary" type="submit">Save Script</Button>
           </FormActions>
         </form>
       </Modal>
@@ -434,18 +431,18 @@ export default function TemplatesPage() {
           showToast(`"${webFormName}" created`);
           setWebFormName(''); setWebFormDesc(''); setShowNewWebForm(false);
         }}>
-          <FormField label="Form Name" required>
-            <FormInput placeholder="e.g. Contact Us" required value={webFormName} onChange={(e) => setWebFormName(e.target.value)} />
-          </FormField>
-          <FormField label="Description">
-            <FormTextarea placeholder="What is this form for?" value={webFormDesc} onChange={(e) => setWebFormDesc(e.target.value)} style={{ minHeight: '80px' }} />
-          </FormField>
-          <div className="info-box" style={{ marginBottom: 'var(--space-5)', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
+          <Field label="Form Name" required>
+            <Input placeholder="e.g. Contact Us" required value={webFormName} onChange={(e) => setWebFormName(e.target.value)} />
+          </Field>
+          <Field label="Description">
+            <Textarea placeholder="What is this form for?" value={webFormDesc} onChange={(e) => setWebFormDesc(e.target.value)} style={{ minHeight: '80px' }} />
+          </Field>
+          <div className="info-box mb-5 text-xs text-tertiary">
             A default form with Name, Email, and Message fields will be created. You can customize the fields after.
           </div>
           <FormActions>
-            <button type="button" className="btn btn-secondary" onClick={() => setShowNewWebForm(false)}>Cancel</button>
-            <button type="submit" className="btn btn-primary">Create Form</button>
+            <Button onClick={() => setShowNewWebForm(false)}>Cancel</Button>
+            <Button variant="primary" type="submit">Create Form</Button>
           </FormActions>
         </form>
       </Modal>

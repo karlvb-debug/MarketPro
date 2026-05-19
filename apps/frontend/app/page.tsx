@@ -5,7 +5,7 @@ import PageHeader from './components/PageHeader';
 import StatCard, { StatsGrid } from './components/StatCard';
 import StatusBadge, { ChannelIcon } from './components/StatusBadge';
 import DataTable, { Card } from './components/DataTable';
-import EmptyState from './components/EmptyState';
+import { EmptyState } from './components/ui';
 
 export default function DashboardPage() {
   const { stats, campaigns, hydrated } = useStore();

@@ -2,11 +2,16 @@
 
 import { ReactNode } from 'react';
 
-interface EmptyStateProps {
+// ============================================
+// EmptyState — placeholder for empty lists/tables
+// ============================================
+
+export interface EmptyStateProps {
   icon: string;
   title: string;
   description?: string;
-  children?: ReactNode; // CTA button
+  /** Optional CTA button or action */
+  children?: ReactNode;
 }
 
 export default function EmptyState({ icon, title, description, children }: EmptyStateProps) {
