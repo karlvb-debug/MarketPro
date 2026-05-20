@@ -2,7 +2,8 @@ import { SQSEvent, SQSHandler } from 'aws-lambda';
 import { PinpointSMSVoiceV2Client, SendTextMessageCommand } from '@aws-sdk/client-pinpoint-sms-voice-v2';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../lib/db';
-import { campaigns, smsTemplates, contacts, contactSegment, workspaceSettings, campaignMessages } from '../../drizzle/schema';
+import { campaigns, smsTemplates, contacts, contactSegment, workspaceSettings, campaignMessages, suppressionList } from '../../drizzle/schema';
+import * as crypto from 'crypto';
 
 const smsClient = new PinpointSMSVoiceV2Client({});
 
@@ -64,12 +65,29 @@ export const handler: SQSHandler = async (event: SQSEvent) => {
         )
       );
 
+      // 4.5 Fetch Suppression List
+      const suppressions = await db
+        .select({ phoneHash: suppressionList.phoneHash })
+        .from(suppressionList)
+        .where(eq(suppressionList.workspaceId, workspaceId));
+
+      const suppressedHashes = new Set(
+        suppressions.map((s: any) => s.phoneHash).filter(Boolean)
+      );
+
       let delivered = 0;
       let total = segmentContactsResult.length;
 
       // 5. Send SMS Messages via AWS End User Messaging v2
       for (const { contact } of segmentContactsResult) {
         if (!contact.phone) continue;
+
+        const phoneNorm = contact.phone.replace(/\D/g, '');
+        const phoneHash = crypto.createHash('sha256').update(phoneNorm).digest('hex');
+        if (suppressedHashes.has(phoneHash)) {
+          console.log(`Phone ${contact.phone} is in suppression list, skipping.`);
+          continue;
+        }
 
         try {
           let messageBody = template.body || '';

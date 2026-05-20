@@ -613,10 +613,19 @@ export function useStore() {
   const deleteContact = useCallback(async (contactId: string) => {
     try {
       await api.contacts.delete(contactId);
-      setData((prev) => ({
-        ...prev,
-        contacts: prev.contacts.filter((c) => c.contactId !== contactId),
-      }));
+      setData((prev) => {
+        const deletedContact = prev.contacts.find((c) => c.contactId === contactId);
+        const contactSegments = deletedContact?.segments || [];
+        const updatedSegments = prev.segments.map((seg) => ({
+          ...seg,
+          count: contactSegments.includes(seg.name) ? Math.max(0, seg.count - 1) : seg.count,
+        }));
+        return {
+          ...prev,
+          contacts: prev.contacts.filter((c) => c.contactId !== contactId),
+          segments: updatedSegments,
+        };
+      });
     } catch (err) {
       console.error('[API] Delete contact failed:', err);
     }
@@ -628,10 +637,24 @@ export function useStore() {
     try {
       await api.contacts.bulkDelete(contactIds);
       const idSet = new Set(contactIds);
-      setData((prev) => ({
-        ...prev,
-        contacts: prev.contacts.filter((c) => !idSet.has(c.contactId)),
-      }));
+      setData((prev) => {
+        const deletedContacts = prev.contacts.filter((c) => idSet.has(c.contactId));
+        const segmentDecrementMap = new Map<string, number>();
+        for (const c of deletedContacts) {
+          for (const s of (c.segments || [])) {
+            segmentDecrementMap.set(s, (segmentDecrementMap.get(s) || 0) + 1);
+          }
+        }
+        const updatedSegments = prev.segments.map((seg) => ({
+          ...seg,
+          count: Math.max(0, seg.count - (segmentDecrementMap.get(seg.name) || 0)),
+        }));
+        return {
+          ...prev,
+          contacts: prev.contacts.filter((c) => !idSet.has(c.contactId)),
+          segments: updatedSegments,
+        };
+      });
     } catch (err) {
       console.error('[API] Bulk delete failed:', err);
     }
@@ -737,7 +760,34 @@ export function useStore() {
         added++;
       }
 
-      return { ...prev, contacts: [...created, ...updatedContacts] };
+      // Calculate how many contacts were added to each segment
+      const segmentIncrementMap = new Map<string, number>();
+      for (const c of created) {
+        for (const s of (c.segments || [])) {
+          segmentIncrementMap.set(s, (segmentIncrementMap.get(s) || 0) + 1);
+        }
+      }
+      for (const merged of updatedPayload) {
+        const emailNorm = merged.email?.toLowerCase().trim();
+        const phoneNorm = merged.phone?.replace(/\D/g, '');
+        const existing = prev.contacts.find(c => 
+          (emailNorm && c.email?.toLowerCase().trim() === emailNorm) || 
+          (phoneNorm && c.phone?.replace(/\D/g, '') === phoneNorm)
+        );
+        const existingSegs = new Set(existing?.segments || []);
+        for (const s of (merged.segments || [])) {
+          if (!existingSegs.has(s)) {
+            segmentIncrementMap.set(s, (segmentIncrementMap.get(s) || 0) + 1);
+          }
+        }
+      }
+
+      const updatedSegments = prev.segments.map((seg) => ({
+        ...seg,
+        count: seg.count + (segmentIncrementMap.get(seg.name) || 0),
+      }));
+
+      return { ...prev, contacts: [...created, ...updatedContacts], segments: updatedSegments };
     });
 
     const allImports = [

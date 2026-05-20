@@ -2,7 +2,8 @@ import { SQSEvent, SQSHandler } from 'aws-lambda';
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import { eq, and, inArray } from 'drizzle-orm';
 import { getDb } from '../lib/db';
-import { campaigns, emailTemplates, contacts, contactSegment, workspaceSettings, campaignMessages } from '../../drizzle/schema';
+import { campaigns, emailTemplates, contacts, contactSegment, workspaceSettings, campaignMessages, suppressionList } from '../../drizzle/schema';
+import * as crypto from 'crypto';
 
 const ses = new SESClient({});
 
@@ -64,7 +65,15 @@ export const handler: SQSHandler = async (event: SQSEvent) => {
         )
       );
 
-      // In a real app, you would also filter against the suppressionList here using SHA-256 of emails.
+      // 4.5 Fetch Suppression List
+      const suppressions = await db
+        .select({ emailHash: suppressionList.emailHash })
+        .from(suppressionList)
+        .where(eq(suppressionList.workspaceId, workspaceId));
+
+      const suppressedHashes = new Set(
+        suppressions.map((s: any) => s.emailHash).filter(Boolean)
+      );
 
       let delivered = 0;
       let total = segmentContactsResult.length;
@@ -72,6 +81,12 @@ export const handler: SQSHandler = async (event: SQSEvent) => {
       // 5. Send Emails
       for (const { contact } of segmentContactsResult) {
         if (!contact.email) continue;
+
+        const emailHash = crypto.createHash('sha256').update(contact.email.toLowerCase().trim()).digest('hex');
+        if (suppressedHashes.has(emailHash)) {
+          console.log(`Email ${contact.email} is in suppression list, skipping.`);
+          continue;
+        }
 
         try {
           // Replace merge tags (basic implementation)

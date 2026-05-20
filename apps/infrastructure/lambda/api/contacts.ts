@@ -7,13 +7,48 @@
 // ============================================
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { eq, and, or, ilike, sql, inArray } from 'drizzle-orm';
+import { eq, ne, and, or, ilike, sql, inArray } from 'drizzle-orm';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getDb, respond, getWorkspaceId, getUserId, requireRole, isSuperAdmin, methodToAction } from '../lib/db';
-import { contacts, adminAuditLog, segments, contactSegment } from '../../drizzle/schema';
+import { contacts, adminAuditLog, segments, contactSegment, suppressionList } from '../../drizzle/schema';
+import * as crypto from 'crypto';
 
 const s3Client = new S3Client({});
+
+const syncSuppression = async (db: any, workspaceId: string, email: string | null, phone: string | null, status: string) => {
+  if (['unsubscribed', 'bounced', 'complained'].includes(status)) {
+    const reason = status === 'unsubscribed' ? 'unsubscribe' : status === 'bounced' ? 'bounce' : 'complaint';
+    
+    if (email) {
+      const emailHash = crypto.createHash('sha256').update(email.toLowerCase().trim()).digest('hex');
+      const [existing] = await db.select().from(suppressionList).where(
+        and(eq(suppressionList.workspaceId, workspaceId), eq(suppressionList.emailHash, emailHash))
+      );
+      if (!existing) {
+        await db.insert(suppressionList).values({
+          workspaceId,
+          emailHash,
+          reason,
+        });
+      }
+    }
+    if (phone) {
+      const phoneNorm = phone.replace(/\D/g, '');
+      const phoneHash = crypto.createHash('sha256').update(phoneNorm).digest('hex');
+      const [existing] = await db.select().from(suppressionList).where(
+        and(eq(suppressionList.workspaceId, workspaceId), eq(suppressionList.phoneHash, phoneHash))
+      );
+      if (!existing) {
+        await db.insert(suppressionList).values({
+          workspaceId,
+          phoneHash,
+          reason,
+        });
+      }
+    }
+  }
+};
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   const method = event.httpMethod;
@@ -63,10 +98,15 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       const params = event.queryStringParameters || {};
       const pageSize = Math.min(100, parseInt(params.pageSize || '50', 10));
       const cursor = params.cursor;  // contactId of the last item from previous page
+      const status = params.status?.trim();
       const search = params.search?.trim();
 
       // Build WHERE conditions
       const conditions = [eq(contacts.workspaceId, workspaceId)];
+
+      if (status) {
+        conditions.push(eq(contacts.status, status as any));
+      }
 
       // Cursor-based keyset pagination: fetch rows after the cursor
       if (cursor) {
@@ -241,26 +281,64 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         customFields: body.custom_fields || body.customFields || {},
       };
 
-      // Upsert: if email already exists in this workspace, merge non-empty fields
-      const [row] = await db
-        .insert(contacts)
-        .values(values)
-        .onConflictDoUpdate({
-          target: [contacts.workspaceId, contacts.email],
-          set: {
-            firstName: sql`COALESCE(EXCLUDED.first_name, contacts.first_name)`,
-            lastName: sql`COALESCE(EXCLUDED.last_name, contacts.last_name)`,
-            phone: sql`COALESCE(EXCLUDED.phone, contacts.phone)`,
-            company: sql`COALESCE(EXCLUDED.company, contacts.company)`,
-            timezone: sql`COALESCE(EXCLUDED.timezone, contacts.timezone)`,
-            state: sql`COALESCE(EXCLUDED.state, contacts.state)`,
-            consentSource: sql`COALESCE(EXCLUDED.consent_source, contacts.consent_source)`,
-            updatedAt: new Date(),
-          },
-        })
-        .returning();
+      // 1. Check if email or phone already exists in this workspace
+      let existingContact: any = null;
+      if (values.email) {
+        const [match] = await db
+          .select()
+          .from(contacts)
+          .where(and(eq(contacts.workspaceId, workspaceId), eq(contacts.email, values.email)));
+        if (match) existingContact = match;
+      }
+      if (!existingContact && values.phone) {
+        const [match] = await db
+          .select()
+          .from(contacts)
+          .where(and(eq(contacts.workspaceId, workspaceId), eq(contacts.phone, values.phone)));
+        if (match) existingContact = match;
+      }
 
-      return respond(201, row);
+      let row: any;
+      let statusCode = 201;
+      if (existingContact) {
+        // Merge values: keep existing if new is empty
+        const merged = {
+          firstName: values.firstName || existingContact.firstName,
+          lastName: values.lastName || existingContact.lastName,
+          email: values.email || existingContact.email,
+          phone: values.phone || existingContact.phone,
+          company: values.company || existingContact.company,
+          timezone: values.timezone || existingContact.timezone,
+          state: values.state || existingContact.state,
+          // Unsubscribed/Bounced/Complained status retention:
+          status: ['unsubscribed', 'bounced', 'complained'].includes(existingContact.status)
+            ? existingContact.status
+            : (values.status || existingContact.status),
+          consentSource: values.consentSource || existingContact.consentSource,
+          customFields: { ...existingContact.customFields, ...values.customFields },
+          updatedAt: new Date(),
+        };
+
+        const [updated] = await db
+          .update(contacts)
+          .set(merged)
+          .where(eq(contacts.contactId, existingContact.contactId))
+          .returning();
+        row = updated;
+        statusCode = 200;
+      } else {
+        // Insert new contact
+        const [inserted] = await db
+          .insert(contacts)
+          .values(values)
+          .returning();
+        row = inserted;
+      }
+
+      // Sync suppression list if the contact is suppressed
+      await syncSuppression(db, workspaceId, row.email, row.phone, row.status);
+
+      return respond(statusCode, row);
     }
 
     // PUT /contacts/{id}
@@ -282,11 +360,48 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       if (body.consent_source ?? body.consentSource) updates.consentSource = body.consent_source || body.consentSource;
       if (body.custom_fields ?? body.customFields) updates.customFields = body.custom_fields || body.customFields;
 
+      // Check conflicts before updating
+      if (updates.email) {
+        const [conflict] = await db
+          .select()
+          .from(contacts)
+          .where(
+            and(
+              eq(contacts.workspaceId, workspaceId),
+              eq(contacts.email, updates.email),
+              ne(contacts.contactId, pathId)
+            )
+          );
+        if (conflict) {
+          return respond(400, { message: `A contact with email "${updates.email}" already exists.` });
+        }
+      }
+
+      if (updates.phone) {
+        const [conflict] = await db
+          .select()
+          .from(contacts)
+          .where(
+            and(
+              eq(contacts.workspaceId, workspaceId),
+              eq(contacts.phone, updates.phone),
+              ne(contacts.contactId, pathId)
+            )
+          );
+        if (conflict) {
+          return respond(400, { message: `A contact with phone "${updates.phone}" already exists.` });
+        }
+      }
+
       const [row] = await db.update(contacts).set(updates).where(
         and(eq(contacts.contactId, pathId), eq(contacts.workspaceId, workspaceId))
       ).returning();
 
       if (!row) return respond(404, { message: 'Contact not found' });
+
+      // Sync suppression list if the contact is suppressed
+      await syncSuppression(db, workspaceId, row.email, row.phone, row.status);
+
       return respond(200, row);
     }
 

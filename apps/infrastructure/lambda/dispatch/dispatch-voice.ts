@@ -2,7 +2,8 @@ import { SQSEvent, SQSHandler } from 'aws-lambda';
 import { ConnectClient, StartOutboundVoiceContactCommand } from '@aws-sdk/client-connect';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../lib/db';
-import { campaigns, callScripts, contacts, contactSegment, workspaceSettings, campaignMessages } from '../../drizzle/schema';
+import { campaigns, callScripts, contacts, contactSegment, workspaceSettings, campaignMessages, suppressionList } from '../../drizzle/schema';
+import * as crypto from 'crypto';
 
 const connectClient = new ConnectClient({});
 const INSTANCE_ID = process.env.CONNECT_INSTANCE_ID;
@@ -66,12 +67,29 @@ export const handler: SQSHandler = async (event: SQSEvent) => {
         )
       );
 
+      // 4.5 Fetch Suppression List
+      const suppressions = await db
+        .select({ phoneHash: suppressionList.phoneHash })
+        .from(suppressionList)
+        .where(eq(suppressionList.workspaceId, workspaceId));
+
+      const suppressedHashes = new Set(
+        suppressions.map((s: any) => s.phoneHash).filter(Boolean)
+      );
+
       let delivered = 0;
       let total = segmentContactsResult.length;
 
       // 5. Initiate Calls
       for (const { contact } of segmentContactsResult) {
         if (!contact.phone) continue;
+
+        const phoneNorm = contact.phone.replace(/\D/g, '');
+        const phoneHash = crypto.createHash('sha256').update(phoneNorm).digest('hex');
+        if (suppressedHashes.has(phoneHash)) {
+          console.log(`Phone ${contact.phone} is in suppression list, skipping voice call.`);
+          continue;
+        }
 
         try {
           // You could pass attributes to Connect here to use in the contact flow
