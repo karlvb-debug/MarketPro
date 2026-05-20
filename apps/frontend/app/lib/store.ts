@@ -299,39 +299,6 @@ async function loadFromApi(): Promise<StoreData | null> {
     const res = await api.batch.load() as any;
     if (!res) return null;
 
-    const rawContacts = res.contacts || [];
-    const contacts: Contact[] = rawContacts.map((row: any) => {
-      const status = row.status || 'active';
-      const comp = defaultCompliance();
-      // Rebuild compliance from DB status
-      if (status === 'unsubscribed') {
-        const ts = row.updatedAt || row.updated_at || new Date().toISOString();
-        comp.email = { suppressed: true, reason: 'unsubscribed', updatedAt: ts };
-        comp.sms = { suppressed: true, reason: 'unsubscribed', updatedAt: ts };
-        comp.voice = { suppressed: true, reason: 'unsubscribed', updatedAt: ts };
-      } else if (status === 'bounced') {
-        comp.email = { suppressed: true, reason: 'bounced', updatedAt: row.updatedAt || row.updated_at || new Date().toISOString() };
-      } else if (status === 'complained') {
-        comp.email = { suppressed: true, reason: 'complained', updatedAt: row.updatedAt || row.updated_at || new Date().toISOString() };
-      }
-      return {
-        contactId: row.contactId || row.contact_id || crypto.randomUUID(),
-        firstName: row.firstName || row.first_name || '',
-        lastName: row.lastName || row.last_name || '',
-        email: row.email || '',
-        phone: row.phone || '',
-        company: row.company || '',
-        timezone: row.timezone || undefined,
-        state: row.state || undefined,
-        compliance: comp,
-        segments: [],
-        source: row.source || '',
-        consentSource: row.consentSource || row.consent_source || undefined,
-        customFields: row.customFields || row.custom_fields || undefined,
-        createdAt: row.createdAt || row.created_at || new Date().toISOString(),
-      };
-    });
-
     const rawSegments = res.segments || [];
     const segments: Segment[] = rawSegments.map((row: any) => ({
       segmentId: row.segmentId || row.segment_id || crypto.randomUUID(),
@@ -342,28 +309,6 @@ async function loadFromApi(): Promise<StoreData | null> {
       order: row.sortOrder || row.sort_order || 0,
       color: row.color || undefined,
     }));
-
-    // Build segment membership: contactId → [segmentName, ...]
-    const segmentIdToName = new Map<string, string>();
-    for (const seg of segments) {
-      segmentIdToName.set(seg.segmentId, seg.name);
-    }
-    const contactSegmentMap = new Map<string, string[]>();
-    for (const cs of (res.contactSegments || [])) {
-      const cid = cs.contactId || cs.contact_id;
-      const sid = cs.segmentId || cs.segment_id;
-      const segName = segmentIdToName.get(sid);
-      if (cid && segName) {
-        const existing = contactSegmentMap.get(cid) || [];
-        existing.push(segName);
-        contactSegmentMap.set(cid, existing);
-      }
-    }
-
-    // Populate each contact's segments array
-    for (const c of contacts) {
-      c.segments = contactSegmentMap.get(c.contactId) || [];
-    }
 
     const rawCampaigns = res.campaigns || [];
     const campaigns: Campaign[] = rawCampaigns.map((row: any) => ({
@@ -413,7 +358,7 @@ async function loadFromApi(): Promise<StoreData | null> {
     }));
 
     return {
-      contacts,
+      contacts: [],
       segments,
       segmentFolders: [],
       campaigns,
@@ -422,7 +367,8 @@ async function loadFromApi(): Promise<StoreData | null> {
       inbox: [],
       settings: getDefaultSettings(),
     };
-  } catch {
+  } catch (err) {
+    console.error('loadFromApi error:', err);
     return null;
   }
 }
@@ -439,11 +385,82 @@ export function useStore() {
   const [hydrated, setHydrated] = useState(false);
   const [loadError, setLoadError] = useState(false);
 
+  // Pagination states
+  const [contactsMeta, setContactsMeta] = useState({ total: 0, pageSize: 50, nextCursor: null as string | null, hasMore: false });
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [contactsFilter, setContactsFilter] = useState({ search: '', segmentId: null as string | null, status: '' });
+
+  // loadContacts definition
+  const loadContacts = useCallback(async (reset: boolean = false) => {
+    setContactsLoading(true);
+    try {
+      const cursor = reset ? undefined : contactsMeta.nextCursor;
+      const res = await api.contacts.list({
+        pageSize: contactsMeta.pageSize,
+        cursor: cursor || undefined,
+        search: contactsFilter.search || undefined,
+        status: contactsFilter.status || undefined,
+        segmentId: contactsFilter.segmentId || undefined,
+      }) as any;
+
+      if (res && res.data) {
+        const rawContacts = res.data || [];
+        const newContacts: Contact[] = rawContacts.map((row: any) => {
+          const status = row.status || 'active';
+          const comp = defaultCompliance();
+          if (status === 'unsubscribed') {
+            const ts = row.updatedAt || row.updated_at || new Date().toISOString();
+            comp.email = { suppressed: true, reason: 'unsubscribed', updatedAt: ts };
+            comp.sms = { suppressed: true, reason: 'unsubscribed', updatedAt: ts };
+            comp.voice = { suppressed: true, reason: 'unsubscribed', updatedAt: ts };
+          } else if (status === 'bounced') {
+            comp.email = { suppressed: true, reason: 'bounced', updatedAt: row.updatedAt || row.updated_at || new Date().toISOString() };
+          } else if (status === 'complained') {
+            comp.email = { suppressed: true, reason: 'complained', updatedAt: row.updatedAt || row.updated_at || new Date().toISOString() };
+          }
+          return {
+            contactId: row.contactId || row.contact_id || crypto.randomUUID(),
+            firstName: row.firstName || row.first_name || '',
+            lastName: row.lastName || row.last_name || '',
+            email: row.email || '',
+            phone: row.phone || '',
+            company: row.company || '',
+            timezone: row.timezone || undefined,
+            state: row.state || undefined,
+            compliance: comp,
+            segments: row.segments || [],
+            source: row.source || '',
+            consentSource: row.consentSource || row.consent_source || undefined,
+            customFields: row.customFields || row.custom_fields || undefined,
+            createdAt: row.createdAt || row.created_at || new Date().toISOString(),
+          };
+        });
+
+        setData((prev) => ({
+          ...prev,
+          contacts: reset ? newContacts : [...prev.contacts, ...newContacts],
+        }));
+
+        setContactsMeta({
+          total: res.meta?.total || 0,
+          pageSize: res.meta?.pageSize || 50,
+          nextCursor: res.meta?.nextCursor || null,
+          hasMore: res.meta?.hasMore || false,
+        });
+      }
+    } catch (err) {
+      console.error('[API] loadContacts failed:', err);
+    } finally {
+      setContactsLoading(false);
+    }
+  }, [workspaceId, contactsMeta.pageSize, contactsMeta.nextCursor, contactsFilter]);
+
   // Reload data from API when workspace changes
   useEffect(() => {
     if (!wsHydrated) return;
     setHydrated(false);
     setLoadError(false);
+    setContactsFilter({ search: '', segmentId: null, status: '' });
     loadFromApi().then((apiData) => {
       setData(apiData ?? getEmptyData());
       setHydrated(true);
@@ -454,6 +471,12 @@ export function useStore() {
       setLoadError(true);
     });
   }, [workspaceId, wsHydrated]);
+
+  // Synchronize contacts load when filters or workspace changes
+  useEffect(() => {
+    if (!wsHydrated) return;
+    loadContacts(true);
+  }, [workspaceId, wsHydrated, contactsFilter]);
 
   // Fire-and-forget API call helper
   const apiCall = useCallback(async <T>(fn: () => Promise<T>): Promise<T | null> => {
@@ -519,6 +542,7 @@ export function useStore() {
         }));
         return { ...prev, contacts: [newContact, ...prev.contacts], segments: updatedSegments };
       });
+      setContactsMeta((prev) => ({ ...prev, total: prev.total + 1 }));
 
       return null;
     } catch (err: any) {
@@ -626,6 +650,7 @@ export function useStore() {
           segments: updatedSegments,
         };
       });
+      setContactsMeta((prev) => ({ ...prev, total: Math.max(0, prev.total - 1) }));
     } catch (err) {
       console.error('[API] Delete contact failed:', err);
     }
@@ -655,6 +680,7 @@ export function useStore() {
           segments: updatedSegments,
         };
       });
+      setContactsMeta((prev) => ({ ...prev, total: Math.max(0, prev.total - contactIds.length) }));
     } catch (err) {
       console.error('[API] Bulk delete failed:', err);
     }
@@ -1322,7 +1348,7 @@ export function useStore() {
   // ---- COMPUTED STATS ----
 
   const stats = {
-    totalContacts: data.contacts.length,
+    totalContacts: contactsMeta.total,
     contactsChange: '',
     activeCampaigns: data.campaigns.filter((c) => ['sending', 'scheduled'].includes(c.status)).length,
     campaignsChange: '',
@@ -1347,14 +1373,14 @@ export function useStore() {
       if (fresh) {
         setData((prev) => ({
           ...prev,
-          contacts: fresh.contacts,
           segments: fresh.segments,
         }));
       }
+      await loadContacts(true);
     } catch (err) {
       console.error('[API] Refresh contacts failed:', err);
     }
-  }, []);
+  }, [loadContacts]);
 
   return {
     ...data,
@@ -1363,6 +1389,11 @@ export function useStore() {
     stats,
     hydrated,
     loadError,
+    contactsMeta,
+    contactsLoading,
+    contactsFilter,
+    setContactsFilter,
+    loadContacts,
     addContact,
     updateContact,
     updateCompliance,

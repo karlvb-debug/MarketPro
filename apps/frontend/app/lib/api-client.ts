@@ -188,7 +188,7 @@ export const api = {
 
   // Contacts
   contacts: {
-    list: (params?: { page?: number; search?: string; status?: string }) =>
+    list: (params?: { pageSize?: number; cursor?: string; search?: string; status?: string; segmentId?: string }) =>
       apiClient.get<ApiResponse<unknown[]>>(`/contacts${toQuery(params)}`),
     get: (id: string) => apiClient.get<unknown>(`/contacts/${id}`),
     create: (data: unknown) => apiClient.post<unknown>('/contacts', data),

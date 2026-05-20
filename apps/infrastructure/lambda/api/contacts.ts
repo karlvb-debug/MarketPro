@@ -100,12 +100,22 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       const cursor = params.cursor;  // contactId of the last item from previous page
       const status = params.status?.trim();
       const search = params.search?.trim();
+      const segmentId = params.segmentId?.trim();
 
       // Build WHERE conditions
       const conditions = [eq(contacts.workspaceId, workspaceId)];
 
       if (status) {
         conditions.push(eq(contacts.status, status as any));
+      }
+
+      if (segmentId) {
+        conditions.push(
+          sql`${contacts.contactId} IN (
+            SELECT contact_id FROM contact_segment 
+            WHERE segment_id = ${segmentId}
+          )`
+        );
       }
 
       // Cursor-based keyset pagination: fetch rows after the cursor
@@ -136,14 +146,67 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       const data = hasMore ? rows.slice(0, pageSize) : rows;
       const nextCursor = hasMore ? data[data.length - 1]?.contactId : null;
 
-      // Get total count (cached/estimated for large tables)
+      // Fetch segment names for the paginated page of contacts
+      let dataWithSegments = data.map((c: any) => ({ ...c, segments: [] }));
+      const contactIds = data.map((c: any) => c.contactId);
+
+      if (contactIds.length > 0) {
+        const contactSegmentsList = await db
+          .select({
+            contactId: contactSegment.contactId,
+            segmentName: segments.name,
+          })
+          .from(contactSegment)
+          .innerJoin(segments, eq(contactSegment.segmentId, segments.segmentId))
+          .where(inArray(contactSegment.contactId, contactIds));
+
+        const segmentMap = new Map<string, string[]>();
+        for (const cs of contactSegmentsList) {
+          if (cs.contactId && cs.segmentName) {
+            const existing = segmentMap.get(cs.contactId) || [];
+            existing.push(cs.segmentName);
+            segmentMap.set(cs.contactId, existing);
+          }
+        }
+
+        dataWithSegments = data.map((c: any) => ({
+          ...c,
+          segments: segmentMap.get(c.contactId) || [],
+        }));
+      }
+
+      // Build count conditions (excluding cursor check)
+      const countConditions = [eq(contacts.workspaceId, workspaceId)];
+      if (status) {
+        countConditions.push(eq(contacts.status, status as any));
+      }
+      if (segmentId) {
+        countConditions.push(
+          sql`${contacts.contactId} IN (
+            SELECT contact_id FROM contact_segment 
+            WHERE segment_id = ${segmentId}
+          )`
+        );
+      }
+      if (search) {
+        countConditions.push(
+          or(
+            ilike(contacts.email, `%${search}%`),
+            ilike(contacts.firstName, `%${search}%`),
+            ilike(contacts.lastName, `%${search}%`),
+            ilike(contacts.company, `%${search}%`),
+          )!
+        );
+      }
+
+      // Get total count matching current filters
       const [countResult] = await db
         .select({ count: sql<number>`count(*)::int` })
         .from(contacts)
-        .where(eq(contacts.workspaceId, workspaceId));
+        .where(and(...countConditions));
 
       return respond(200, {
-        data,
+        data: dataWithSegments,
         meta: {
           total: countResult?.count || 0,
           pageSize,

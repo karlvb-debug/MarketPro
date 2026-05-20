@@ -15,7 +15,7 @@ export default function ContactsPage() {
   const {
     contacts, segments, settings, addContact, updateContact, updateCompliance, deleteContact,
     importContacts, bulkDeleteContacts, addContactsToSegment, removeContactsFromSegment, hydrated,
-    refreshContacts,
+    refreshContacts, contactsMeta, contactsLoading, setContactsFilter, loadContacts,
   } = useStore();
   const confirm = useConfirm();
 
@@ -151,57 +151,20 @@ export default function ContactsPage() {
 
   const activeSegment = activeSegmentId ? segments.find((s) => s.segmentId === activeSegmentId) || null : null;
 
-  // Filter contacts by active segment
-  const segmentContacts = useMemo(() => {
-    if (!activeSegment) return contacts;
-    return contacts.filter((c) => c.segments.includes(activeSegment.name));
-  }, [contacts, activeSegment]);
+  // Synchronize local search/segment/filters to store
+  useEffect(() => {
+    // Extract status filter from advanced filters if it exists
+    const statusFilter = filters.find((f) => f.field === 'status');
+    const status = statusFilter && statusFilter.operator === 'equals' ? statusFilter.value : '';
 
-  // Filter contacts by search + filters
-  const displayContacts = useMemo(() => {
-    let list = segmentContacts;
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter((c) =>
-        `${c.firstName} ${c.lastName}`.toLowerCase().includes(q) ||
-        c.email.toLowerCase().includes(q) ||
-        c.phone.includes(q) ||
-        (c.company || '').toLowerCase().includes(q)
-      );
-    }
-    for (const f of filters) {
-      if (f.operator !== 'is_empty' && f.operator !== 'is_not_empty' && !f.value) continue;
-      list = list.filter((c) => {
-        let fieldValue = '';
-        if (f.field === 'status') {
-          fieldValue = getOverallStatus(c.compliance);
-        } else if (f.field === 'segments') {
-          const v = f.value.toLowerCase();
-          if (f.operator === 'contains') return c.segments.some((s) => s.toLowerCase().includes(v));
-          if (f.operator === 'equals') return c.segments.some((s) => s.toLowerCase() === v);
-          if (f.operator === 'is_empty') return c.segments.length === 0;
-          if (f.operator === 'is_not_empty') return c.segments.length > 0;
-          return true;
-        } else if (f.field.startsWith('custom:')) {
-          const customKey = f.field.replace('custom:', '');
-          fieldValue = c.customFields?.[customKey] || '';
-        } else {
-          fieldValue = String((c as any)[f.field] || '');
-        }
-        const val = fieldValue.toLowerCase();
-        const target = f.value.toLowerCase();
-        switch (f.operator) {
-          case 'contains': return val.includes(target);
-          case 'equals': return val === target;
-          case 'starts_with': return val.startsWith(target);
-          case 'is_empty': return !val;
-          case 'is_not_empty': return !!val;
-          default: return true;
-        }
-      });
-    }
-    return list;
-  }, [segmentContacts, search, filters]);
+    setContactsFilter({
+      search,
+      segmentId: activeSegmentId,
+      status,
+    });
+  }, [search, activeSegmentId, filters, setContactsFilter]);
+
+  const displayContacts = contacts;
 
   // Selection
   const toggleSelect = (id: string) => {
@@ -493,7 +456,40 @@ export default function ContactsPage() {
             </div>
           )}
 
-          {displayContacts.length === 0 ? (
+          {contactsLoading && displayContacts.length === 0 ? (
+            <DataTable headers={['', 'Name', 'Email', 'Phone', 'Company', 'Segments']}>
+              <tr>
+                <th style={{ width: '40px', padding: '0 var(--space-3)' }} />
+                <th>Name</th>
+                <th className="hide-mobile">Email</th>
+                <th className="hide-mobile">Phone</th>
+                <th className="hide-mobile">Company</th>
+                <th className="hide-mobile">Segments</th>
+              </tr>
+              {[...Array(5)].map((_, i) => (
+                <tr key={i}>
+                  <td style={{ width: '40px' }}>
+                    <div className="skeleton-bar" style={{ width: '16px', height: '16px', borderRadius: '4px' }} />
+                  </td>
+                  <td>
+                    <div className="skeleton-bar" style={{ width: '120px', height: '16px' }} />
+                  </td>
+                  <td className="hide-mobile">
+                    <div className="skeleton-bar" style={{ width: '180px', height: '16px' }} />
+                  </td>
+                  <td className="hide-mobile">
+                    <div className="skeleton-bar" style={{ width: '110px', height: '16px' }} />
+                  </td>
+                  <td className="hide-mobile">
+                    <div className="skeleton-bar" style={{ width: '90px', height: '16px' }} />
+                  </td>
+                  <td className="hide-mobile">
+                    <div className="skeleton-bar" style={{ width: '140px', height: '16px' }} />
+                  </td>
+                </tr>
+              ))}
+            </DataTable>
+          ) : displayContacts.length === 0 ? (
             <EmptyState
               icon={search ? '🔍' : '👥'}
               title={search ? 'No matches found' : 'No contacts yet'}
@@ -506,49 +502,62 @@ export default function ContactsPage() {
               )}
             </EmptyState>
           ) : (
-            <DataTable headers={['', 'Name', 'Email', 'Phone', 'Company', 'Segments']}>
-              <tr>
-                <th style={{ width: '40px', padding: '0 var(--space-3)' }}>
-                  <input
-                    type="checkbox"
-                    title="Select all"
-                    checked={displayContacts.length > 0 && displayContacts.every((c) => selectedIds.has(c.contactId))}
-                    ref={(el) => {
-                      if (el) el.indeterminate = selectedIds.size > 0 && !displayContacts.every((c) => selectedIds.has(c.contactId));
-                    }}
-                    onChange={toggleSelectAll}
-                  />
-                </th>
-                <th>Name</th>
-                <th className="hide-mobile">Email</th>
-                <th className="hide-mobile">Phone</th>
-                <th className="hide-mobile">Company</th>
-                <th className="hide-mobile">Segments</th>
-              </tr>
-              {displayContacts.map((c) => (
-                <tr key={c.contactId}>
-                  <td style={{ width: '40px' }}>
-                    <input type="checkbox" checked={selectedIds.has(c.contactId)} onChange={() => toggleSelect(c.contactId)} />
-                  </td>
-                  <td>
-                    <button
-                      onClick={() => setSelectedContact(c)}
-                      style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontWeight: 500, padding: 0, textAlign: 'left' }}
-                    >
-                      {c.firstName} {c.lastName}
-                    </button>
-                  </td>
-                  <td className="text-secondary hide-mobile">{c.email || '—'}</td>
-                  <td className="text-secondary hide-mobile">{c.phone || '—'}</td>
-                  <td className="text-secondary hide-mobile">{c.company || '—'}</td>
-                  <td className="hide-mobile">
-                    <div className="flex gap-1 flex-wrap">
-                      {c.segments.map((s) => <span key={s} className="badge badge-subtle">{s}</span>)}
-                    </div>
-                  </td>
+            <>
+              <DataTable headers={['', 'Name', 'Email', 'Phone', 'Company', 'Segments']}>
+                <tr>
+                  <th style={{ width: '40px', padding: '0 var(--space-3)' }}>
+                    <input
+                      type="checkbox"
+                      title="Select all"
+                      checked={displayContacts.length > 0 && displayContacts.every((c) => selectedIds.has(c.contactId))}
+                      ref={(el) => {
+                        if (el) el.indeterminate = selectedIds.size > 0 && !displayContacts.every((c) => selectedIds.has(c.contactId));
+                      }}
+                      onChange={toggleSelectAll}
+                    />
+                  </th>
+                  <th>Name</th>
+                  <th className="hide-mobile">Email</th>
+                  <th className="hide-mobile">Phone</th>
+                  <th className="hide-mobile">Company</th>
+                  <th className="hide-mobile">Segments</th>
                 </tr>
-              ))}
-            </DataTable>
+                {displayContacts.map((c) => (
+                  <tr key={c.contactId}>
+                    <td style={{ width: '40px' }}>
+                      <input type="checkbox" checked={selectedIds.has(c.contactId)} onChange={() => toggleSelect(c.contactId)} />
+                    </td>
+                    <td>
+                      <button
+                        onClick={() => setSelectedContact(c)}
+                        style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontWeight: 500, padding: 0, textAlign: 'left' }}
+                      >
+                        {c.firstName} {c.lastName}
+                      </button>
+                    </td>
+                    <td className="text-secondary hide-mobile">{c.email || '—'}</td>
+                    <td className="text-secondary hide-mobile">{c.phone || '—'}</td>
+                    <td className="text-secondary hide-mobile">{c.company || '—'}</td>
+                    <td className="hide-mobile">
+                      <div className="flex gap-1 flex-wrap">
+                        {c.segments.map((s) => <span key={s} className="badge badge-subtle">{s}</span>)}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </DataTable>
+              {contactsMeta.hasMore && (
+                <div style={{ display: 'flex', justifyContent: 'center', margin: 'var(--space-6) 0' }}>
+                  <Button
+                    variant="secondary"
+                    onClick={() => loadContacts(false)}
+                    disabled={contactsLoading}
+                  >
+                    {contactsLoading ? 'Loading...' : 'Load More Contacts'}
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </div>
 

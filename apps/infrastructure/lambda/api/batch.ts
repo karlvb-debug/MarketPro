@@ -8,7 +8,6 @@ import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { eq, sql } from 'drizzle-orm';
 import { getDb, respond, getWorkspaceId, getUserId } from '../lib/db';
 import {
-  contacts,
   segments,
   contactSegment,
   campaigns,
@@ -30,16 +29,13 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
   try {
     // Run all queries in parallel — single Lambda, single DB connection
     const [
-      contactRows,
       segmentRows,
-      contactSegmentRows,
       campaignRows,
       emailTplRows,
       smsTplRows,
       voiceRows,
       settingsRows,
     ] = await Promise.all([
-      db.select().from(contacts).where(eq(contacts.workspaceId, workspaceId)).orderBy(contacts.createdAt),
       // Segments with contact counts via subquery
       db.select({
         segmentId: segments.segmentId,
@@ -55,13 +51,6 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
           WHERE cs.segment_id = ${segments.segmentId}
         )`,
       }).from(segments).where(eq(segments.workspaceId, workspaceId)).orderBy(segments.sortOrder),
-      // Contact-segment membership for this workspace's contacts
-      db.select({
-        contactId: contactSegment.contactId,
-        segmentId: contactSegment.segmentId,
-      }).from(contactSegment)
-        .innerJoin(contacts, eq(contactSegment.contactId, contacts.contactId))
-        .where(eq(contacts.workspaceId, workspaceId)),
       db.select().from(campaigns).where(eq(campaigns.workspaceId, workspaceId)).orderBy(campaigns.createdAt),
       db.select().from(emailTemplates).where(eq(emailTemplates.workspaceId, workspaceId)).orderBy(emailTemplates.sortOrder),
       db.select().from(smsTemplates).where(eq(smsTemplates.workspaceId, workspaceId)).orderBy(smsTemplates.sortOrder),
@@ -70,9 +59,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     ]);
 
     return respond(200, {
-      contacts: contactRows,
       segments: segmentRows,
-      contactSegments: contactSegmentRows,
       campaigns: campaignRows,
       templates: {
         email: emailTplRows,
