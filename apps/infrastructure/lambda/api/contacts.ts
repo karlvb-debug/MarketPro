@@ -11,7 +11,7 @@ import { eq, and, or, ilike, sql, inArray } from 'drizzle-orm';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getDb, respond, getWorkspaceId, getUserId, requireRole, isSuperAdmin, methodToAction } from '../lib/db';
-import { contacts, adminAuditLog } from '../../drizzle/schema';
+import { contacts, adminAuditLog, segments, contactSegment } from '../../drizzle/schema';
 
 const s3Client = new S3Client({});
 
@@ -38,11 +38,14 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
       const uploadBucket = process.env.UPLOAD_BUCKET;
       if (!uploadBucket) return respond(500, { message: 'Upload bucket not configured' });
+      const params = event.queryStringParameters || {};
+      const segmentId = params.segmentId?.trim();
 
       // Create a unique key for the import file, ensuring it's isolated by workspace
       const fileId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-      const key = `${workspaceId}/import-${fileId}.csv`;
-
+      const key = segmentId
+        ? `${workspaceId}/import-${fileId}-seg-${segmentId}.csv`
+        : `${workspaceId}/import-${fileId}.csv`;
       const command = new PutObjectCommand({
         Bucket: uploadBucket,
         Key: key,
@@ -129,6 +132,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       if (writeDenied) return writeDenied;
       const body = JSON.parse(event.body || '{}');
       const rawRows: unknown[] = Array.isArray(body.contacts) ? body.contacts.slice(0, 1000) : [];
+      const segmentId = body.segmentId?.trim();
       if (rawRows.length === 0) return respond(400, { message: 'No contacts provided' });
 
       const toValues = (c: any) => ({
@@ -152,6 +156,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       const rejected = rawRows.length - withEmail.length - phoneOnly.length;
 
       let imported = 0;
+      const contactIds: string[] = [];
 
       // Pass 1: Upsert contacts WITH email (deduplicate on workspace + email)
       if (withEmail.length > 0) {
@@ -173,6 +178,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
           })
           .returning({ contactId: contacts.contactId });
         imported += result.length;
+        contactIds.push(...result.map((r) => r.contactId));
       }
 
       // Pass 2: Upsert phone-only contacts (deduplicate on workspace + phone)
@@ -194,6 +200,20 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
           })
           .returning({ contactId: contacts.contactId });
         imported += result.length;
+        contactIds.push(...result.map((r) => r.contactId));
+      }
+
+      // Pass 3: Associate with segment if segmentId is provided and contactIds is not empty
+      if (segmentId && contactIds.length > 0) {
+        // Verify segment belongs to this workspace
+        const [seg] = await db
+          .select()
+          .from(segments)
+          .where(and(eq(segments.segmentId, segmentId), eq(segments.workspaceId, workspaceId)));
+        if (seg) {
+          const csRows = contactIds.map((cid) => ({ contactId: cid, segmentId }));
+          await db.insert(contactSegment).values(csRows).onConflictDoNothing();
+        }
       }
 
       return respond(200, { imported, rejected });

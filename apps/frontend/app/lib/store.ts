@@ -492,12 +492,25 @@ export function useStore() {
     // Create on server — server generates the canonical UUID
     try {
       const row = await api.contacts.create(contactToApi(contact)) as any;
+      const realContactId = row.contactId || row.contact_id;
       const newContact: Contact = {
         ...contact,
-        contactId: row.contactId || row.contact_id || crypto.randomUUID(),
+        contactId: realContactId || crypto.randomUUID(),
         compliance: defaultCompliance(),
         createdAt: row.createdAt || row.created_at || new Date().toISOString(),
       };
+
+      // Associate with segments on the server
+      if (realContactId && contact.segments && contact.segments.length > 0) {
+        await Promise.all(
+          contact.segments.map(async (segName) => {
+            const seg = data.segments.find((s) => s.name === segName);
+            if (seg) {
+              await api.segments.addContacts(seg.segmentId, [realContactId]);
+            }
+          })
+        );
+      }
 
       setData((prev) => {
         const updatedSegments = prev.segments.map((seg) => ({
@@ -512,7 +525,7 @@ export function useStore() {
       console.error('[API] Create contact failed:', err);
       return err?.message || 'Failed to create contact. Please try again.';
     }
-  }, [data.contacts]);
+  }, [data.contacts, data.segments]);
 
   const updateContact = useCallback(async (contactId: string, patch: Partial<Omit<Contact, 'contactId' | 'createdAt'>>) => {
     // Optimistic local update
@@ -623,7 +636,6 @@ export function useStore() {
       console.error('[API] Bulk delete failed:', err);
     }
   }, []);
-
   // Returns { added, skipped, blankSkipped } — skips contacts with duplicate email/phone and blank/unidentifiable rows
   const importContacts = useCallback((newContacts: Omit<Contact, 'contactId' | 'createdAt' | 'compliance'>[]): { added: number; updated: number; skipped: number; blankSkipped: number } => {
     let added = 0;
@@ -632,6 +644,7 @@ export function useStore() {
     let blankSkipped = 0;
 
     const created: Contact[] = [];
+    const updatedPayload: Contact[] = [];
 
     setData((prev) => {
       // Clone existing contacts for mutation
@@ -650,7 +663,6 @@ export function useStore() {
       // Also track emails/phones added within THIS import to avoid intra-batch dupes
       const batchEmails = new Set<string>();
       const batchPhones = new Set<string>();
-
 
       for (const c of newContacts) {
         // Skip blank/unidentifiable contacts
@@ -681,7 +693,7 @@ export function useStore() {
             skipped++;
             continue;
           }
-          updatedContacts[matchIdx] = {
+          const merged: Contact = {
             ...existing,
             firstName: c.firstName?.trim() || existing.firstName,
             lastName: c.lastName?.trim() || existing.lastName,
@@ -691,6 +703,10 @@ export function useStore() {
             timezone: c.timezone?.trim() || existing.timezone || '',
             segments: [...new Set([...(existing.segments || []), ...(c.segments || [])])],
           };
+          updatedContacts[matchIdx] = merged;
+          // Collect for API payload
+          updatedPayload.push(merged);
+
           // Update indexes with the merged contact's values
           if (emailNorm) emailIndex.set(emailNorm, matchIdx);
           if (phoneNorm) phoneIndex.set(phoneNorm, matchIdx);
@@ -724,26 +740,37 @@ export function useStore() {
       return { ...prev, contacts: [...created, ...updatedContacts] };
     });
 
-    // Bulk-import to API in chunks of 1,000 — one HTTP request per chunk
-    // instead of one request per contact.
-    if (created.length > 0) {
+    const allImports = [
+      ...created.map((c) => contactToApi(c)),
+      ...updatedPayload.map((c) => contactToApi(c)),
+    ];
+
+    if (allImports.length > 0) {
+      // Find segmentId from the first contact's segments
+      let segmentId: string | undefined;
+      const firstWithSegment = newContacts.find(c => c.segments && c.segments.length > 0);
+      if (firstWithSegment && firstWithSegment.segments?.[0]) {
+        const seg = data.segments.find(s => s.name === firstWithSegment.segments[0]);
+        if (seg) segmentId = seg.segmentId;
+      }
+
       const chunkSize = 1000;
-      const chunks: Contact[][] = [];
-      for (let i = 0; i < created.length; i += chunkSize) {
-        chunks.push(created.slice(i, i + chunkSize));
+      const chunks: Record<string, unknown>[][] = [];
+      for (let i = 0; i < allImports.length; i += chunkSize) {
+        chunks.push(allImports.slice(i, i + chunkSize));
       }
       // Fire chunks in parallel (they're independent upserts)
       apiCall(() =>
         Promise.all(
           chunks.map((chunk) =>
-            api.contacts.import(chunk.map((c) => contactToApi(c)))
+            api.contacts.import(chunk, segmentId)
           )
         )
       );
     }
 
     return { added, updated, skipped, blankSkipped };
-  }, [apiCall]);
+  }, [apiCall, data.segments]);
 
   // ---- CAMPAIGNS ----
 

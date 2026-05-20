@@ -627,16 +627,15 @@ export default function ContactsPage() {
           </FormActions>
         </form>
       </Modal>
-
       {/* ===== IMPORT WIZARD ===== */}
       <ImportWizard
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
         activeSegmentName={activeSegment?.name}
+        activeSegmentId={activeSegment?.segmentId}
         importContacts={importContacts}
         refreshContacts={refreshContacts}
       />
-
       {/* ===== BULK ADD TO SEGMENT MODAL ===== */}
       <Modal isOpen={showBulkSegmentModal} onClose={() => setShowBulkSegmentModal(false)} title="Add to Segment" width="400px">
         <p className="text-secondary mb-5 text-sm" >

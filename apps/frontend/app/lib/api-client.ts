@@ -195,8 +195,8 @@ export const api = {
     update: (id: string, data: unknown) => apiClient.put<unknown>(`/contacts/${id}`, data),
     delete: (id: string) => apiClient.delete(`/contacts/${id}`),
     bulkDelete: (ids: string[]) => apiClient.delete<{ deleted: number }>('/contacts', { ids }),
-    import: (contacts: unknown[]) => apiClient.post<{ added: number; updated: number; skipped: number }>('/contacts/import', { contacts }),
-    getImportUrl: () => apiClient.get<{ url: string; key: string }>('/contacts/import-url'),
+    import: (contacts: unknown[], segmentId?: string) => apiClient.post<{ added: number; updated: number; skipped: number }>('/contacts/import', { contacts, segmentId }),
+    getImportUrl: (segmentId?: string) => apiClient.get<{ url: string; key: string }>(`/contacts/import-url${segmentId ? `?segmentId=${segmentId}` : ''}`),
   },
 
   // Segments

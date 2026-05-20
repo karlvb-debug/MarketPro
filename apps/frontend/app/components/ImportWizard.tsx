@@ -22,11 +22,11 @@ import { api } from '../lib/api-client';
 // ============================================
 
 type ImportStep = 'upload' | 'map' | 'preview' | 'confirm';
-
 interface ImportWizardProps {
   isOpen: boolean;
   onClose: () => void;
   activeSegmentName?: string;
+  activeSegmentId?: string;
   importContacts: (
     contacts: Omit<Contact, 'contactId' | 'createdAt' | 'compliance'>[]
   ) => { added: number; updated: number; skipped: number; blankSkipped?: number };
@@ -48,6 +48,7 @@ export default function ImportWizard({
   isOpen,
   onClose,
   activeSegmentName,
+  activeSegmentId,
   importContacts,
   refreshContacts,
 }: ImportWizardProps) {
@@ -249,9 +250,8 @@ export default function ImportWizard({
           c.firstName, c.lastName, c.email, c.phone, c.company, c.state, c.timezone
         ].map(val => `"${(val || '').replace(/"/g, '""')}"`).join(','));
         const csvString = [headerRow.join(','), ...csvRowsData].join('\n');
-
         // 2. Get Presigned URL
-        const { url } = await api.contacts.getImportUrl();
+        const { url } = await api.contacts.getImportUrl(activeSegmentId);
 
         // 3. Upload to S3
         const response = await fetch(url, {

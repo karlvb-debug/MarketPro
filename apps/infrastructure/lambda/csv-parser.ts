@@ -3,7 +3,7 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import csv from 'csv-parser';
 import { eq, sql } from 'drizzle-orm';
 import { getDb } from './lib/db';
-import { contacts } from '../drizzle/schema';
+import { contacts, contactSegment } from '../drizzle/schema';
 import { Readable } from 'stream';
 
 const s3Client = new S3Client({});
@@ -25,13 +25,17 @@ export const handler = async (event: any) => {
   }
 
   const { bucket, key } = input;
-  
-  // Extract workspaceId from key: "workspaceId/import-xxxx.csv"
+    // Extract workspaceId from key: "workspaceId/import-xxxx.csv"
   const workspaceId = key.split('/')[0];
   if (!workspaceId) {
     throw new Error('Workspace ID not found in S3 key');
   }
 
+  let segmentId: string | null = null;
+  const segMatch = key.match(/-seg-([a-zA-Z0-9-]+)\.csv$/);
+  if (segMatch) {
+    segmentId = segMatch[1];
+  }
   const db = await getDb();
 
   const getObjectResponse = await s3Client.send(new GetObjectCommand({
@@ -60,8 +64,8 @@ export const handler = async (event: any) => {
       timezone: r.timezone || null,
       state: r.state || null,
       status: 'active' as const,
-      source: 'csv_import',
-      consentSource: 'unknown',
+      source: 'csv_import' as const,
+      consentSource: 'unknown' as const,
       customFields: {},
     })).filter(r => r.email || r.phone || r.firstName || r.lastName);
 
@@ -69,6 +73,8 @@ export const handler = async (event: any) => {
 
     const withEmail = validRows.filter(c => c.email);
     const phoneOnly = validRows.filter(c => !c.email && c.phone);
+
+    const contactIds: string[] = [];
 
     // Pass 1: Upsert contacts WITH email
     if (withEmail.length > 0) {
@@ -89,6 +95,7 @@ export const handler = async (event: any) => {
         })
         .returning({ contactId: contacts.contactId });
       insertedRows += result.length;
+      contactIds.push(...result.map(r => r.contactId));
     }
 
     // Pass 2: Upsert phone-only contacts
@@ -109,6 +116,13 @@ export const handler = async (event: any) => {
         })
         .returning({ contactId: contacts.contactId });
       insertedRows += result.length;
+      contactIds.push(...result.map(r => r.contactId));
+    }
+
+    // Pass 3: Associate with segment if segmentId is present
+    if (segmentId && contactIds.length > 0) {
+      const csRows = contactIds.map(cid => ({ contactId: cid, segmentId }));
+      await db.insert(contactSegment).values(csRows).onConflictDoNothing();
     }
   };
 
