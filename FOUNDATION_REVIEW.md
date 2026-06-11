@@ -72,16 +72,21 @@ Phase-by-phase reality vs. the claims in `TODO.md` / `architecture_plan.md`:
 
 ## 3. Work plan
 
-### Milestone 0 — Safety net & hygiene (≈1 week)
+### Milestone 0 — Safety net & hygiene (≈1 week) — ✅ DONE (June 11, 2026)
 *Goal: every subsequent change is verified by a machine, and the repo leaks nothing.*
 
-- [ ] Remove `cdk-outputs.json` and `contact-utils.ts.bak` from git; add to `.gitignore`; rotate/recreate any resources whose identifiers matter.
-- [ ] Fix Stripe secret handling — resolve the Secrets Manager ARN at runtime like `db.ts` does.
-- [ ] Fix jest config (`@types/jest`); replace the placeholder infrastructure test with real CDK assertions.
-- [ ] Burn down the 189 lint warnings (mostly `no-explicit-any`, unused imports, hook deps).
-- [ ] GitHub Actions CI: install → lint → check-types → test → build on every PR; block merge on red.
-- [ ] Dependency pass: upgrade Next.js/turbo, replace `xlsx`, remove root `cheerio`/`mjml-browser`, enable Dependabot.
-- [ ] Rewrite README for MarketPro (setup, deploy, architecture pointer).
+- [x] Remove `cdk-outputs.json` and `contact-utils.ts.bak` from git; add to `.gitignore`.
+- [x] Fix Stripe secret handling — webhook resolves Secrets Manager ARNs at runtime; billing Lambdas use `DATABASE_SECRET_ARN` instead of credential-less URLs.
+- [x] Fix jest config (broken `typeRoots` + stale compiled `.js` shadowing sources); 10 real CDK assertions incl. plaintext-secret regression guard.
+- [x] Burn down the 189 lint warnings (73 via `react/prop-types` config fix for TS; 116 code fixes with real types; surfaced and fixed an operator-precedence bug in `store.ts updateContact`).
+- [x] GitHub Actions CI: install → lint → check-types → test → build on every PR; `--max-warnings 0` enforced.
+- [x] Dependency pass: Next.js 16.2.0 → 16.2.9, turbo 2.9.18, removed unused `grapesjs`/`grapesjs-mjml`, moved `mjml-browser` + its undeclared `cheerio` external into the frontend workspace, Dependabot enabled (weekly, AWS SDK grouped).
+- [x] Rewrite README for MarketPro (setup, deploy, architecture pointer).
+
+**Known residuals (accepted, tracked):**
+- `xlsx@0.18.5` CVEs (prototype pollution, ReDoS): no fixed version on the npm registry; the patched SheetJS CDN tarball is unreachable from this build environment. Mitigations: input is user-chosen local files only. Plan: replace with `exceljs` or move parsing server-side (M4/M6).
+- Transitive advisories pinned by upstream: `postcss@8.4.31` (pinned by Next), `js-cookie@2.x` (pinned by `amazon-cognito-identity-js`), old `esbuild` (drizzle-kit dev toolchain). Revisit via Dependabot as upstreams release.
+- Leaked identifiers remain in **git history** (account ID, Cognito pool/client IDs, RDS hostname). They are not credentials; rotating means recreating the Cognito pool / RDS endpoint or history rewrite — owner decision, not done.
 
 ### Milestone 1 — Dispatch reliability (≈2 weeks)
 *Goal: a campaign send is exactly-once, resumable, and observable.*
