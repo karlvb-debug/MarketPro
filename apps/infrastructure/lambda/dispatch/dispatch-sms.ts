@@ -1,148 +1,76 @@
-import { SQSEvent, SQSHandler } from 'aws-lambda';
 import { PinpointSMSVoiceV2Client, SendTextMessageCommand } from '@aws-sdk/client-pinpoint-sms-voice-v2';
-import { eq, and } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { getDb } from '../lib/db';
-import { campaigns, smsTemplates, contacts, contactSegment, workspaceSettings, campaignMessages, suppressionList } from '../../drizzle/schema';
-import * as crypto from 'crypto';
+import { smsTemplates } from '../../drizzle/schema';
+import { makeSqsHandler } from './core/engine';
+import { createDispatchStore } from './core/store';
+import { isRetryableError, errorCodeOf, RetryableDispatchError } from './core/errors';
+import { mergeTags, phoneSuppressionHash } from './core/personalize';
+import { ChannelAdapter, SendResult } from './core/types';
 
 const smsClient = new PinpointSMSVoiceV2Client({});
 
-export const handler: SQSHandler = async (event: SQSEvent) => {
-  const db = await getDb();
+interface SmsTemplate {
+  body: string | null;
+}
 
-  for (const record of event.Records) {
-    try {
-      const payload = JSON.parse(record.body);
-      const { campaignId, workspaceId } = payload;
+interface SmsSetup {
+  originationNumber: string;
+  body: string;
+}
 
-      if (!campaignId || !workspaceId) {
-        console.error('Invalid payload:', payload);
-        continue;
-      }
+const smsAdapter: ChannelAdapter<SmsTemplate, SmsSetup> = {
+  channel: 'sms',
+  suppressionHashKind: 'phone',
 
-      console.log(`Processing SMS campaign ${campaignId} for workspace ${workspaceId}`);
+  async fetchTemplate(templateId, workspaceId) {
+    const db = await getDb();
+    const [row] = await db
+      .select({ body: smsTemplates.body })
+      .from(smsTemplates)
+      .where(and(eq(smsTemplates.templateId, templateId), eq(smsTemplates.workspaceId, workspaceId)));
+    return row;
+  },
 
-      // 1. Fetch Campaign
-      const [campaign] = await db.select().from(campaigns).where(
-        and(eq(campaigns.campaignId, campaignId), eq(campaigns.workspaceId, workspaceId))
-      );
-
-      if (!campaign || campaign.status === 'completed' || campaign.status === 'cancelled') {
-        console.log(`Campaign ${campaignId} not found or already processed.`);
-        continue;
-      }
-
-      // 2. Fetch Template
-      const [template] = await db.select().from(smsTemplates).where(
-        and(eq(smsTemplates.templateId, campaign.templateId), eq(smsTemplates.workspaceId, workspaceId))
-      );
-
-      if (!template) {
-        console.error(`SMS Template not found for campaign ${campaignId}`);
-        continue;
-      }
-
-      // 3. Fetch Workspace Settings
-      const [settings] = await db.select().from(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspaceId));
-      
-      const originationNumber = settings?.smsPhoneNumber;
-      if (!originationNumber) {
-        console.error(`No SMS origination number configured for workspace ${workspaceId}`);
-        await db.update(campaigns).set({ status: 'cancelled' }).where(eq(campaigns.campaignId, campaignId));
-        continue;
-      }
-
-      // 4. Fetch Segment Contacts
-      const segmentContactsResult = await db.select({
-        contact: contacts,
-      })
-      .from(contactSegment)
-      .innerJoin(contacts, eq(contactSegment.contactId, contacts.contactId))
-      .where(
-        and(
-          eq(contactSegment.segmentId, campaign.segmentId),
-          eq(contacts.status, 'active')
-        )
-      );
-
-      // 4.5 Fetch Suppression List
-      const suppressions = await db
-        .select({ phoneHash: suppressionList.phoneHash })
-        .from(suppressionList)
-        .where(eq(suppressionList.workspaceId, workspaceId));
-
-      const suppressedHashes = new Set(
-        suppressions.map((s: any) => s.phoneHash).filter(Boolean)
-      );
-
-      let delivered = 0;
-      let total = segmentContactsResult.length;
-
-      // 5. Send SMS Messages via AWS End User Messaging v2
-      for (const { contact } of segmentContactsResult) {
-        if (!contact.phone) continue;
-
-        const phoneNorm = contact.phone.replace(/\D/g, '');
-        const phoneHash = crypto.createHash('sha256').update(phoneNorm).digest('hex');
-        if (suppressedHashes.has(phoneHash)) {
-          console.log(`Phone ${contact.phone} is in suppression list, skipping.`);
-          continue;
-        }
-
-        try {
-          let messageBody = template.body || '';
-          messageBody = messageBody.replace(/{{first_name}}/g, contact.firstName || '');
-          messageBody = messageBody.replace(/{{last_name}}/g, contact.lastName || '');
-          messageBody = messageBody.replace(/{{company}}/g, contact.company || '');
-
-          const response = await smsClient.send(new SendTextMessageCommand({
-            DestinationPhoneNumber: contact.phone,
-            OriginationIdentity: originationNumber,
-            MessageBody: messageBody,
-            MessageType: 'PROMOTIONAL', // or 'TRANSACTIONAL'
-            // ConfigurationSetName can be added for delivery receipt tracking
-          }));
-
-          const providerMessageId = response.MessageId || 'unknown';
-
-          // Log campaign message
-          await db.insert(campaignMessages).values({
-            campaignId,
-            workspaceId,
-            contactId: contact.contactId,
-            channel: 'sms',
-            status: 'sent',
-            fromIdentity: originationNumber,
-            sentAt: new Date(),
-            providerMessageId,
-          });
-
-          delivered++;
-        } catch (err: any) {
-          console.error(`Failed to send SMS to ${contact.phone}:`, err.message);
-          
-          await db.insert(campaignMessages).values({
-            campaignId,
-            workspaceId,
-            contactId: contact.contactId,
-            channel: 'sms',
-            status: 'failed',
-            fromIdentity: originationNumber,
-            errorCode: err.message?.substring(0, 100),
-          });
-        }
-      }
-
-      // 6. Complete Campaign
-      await db.update(campaigns).set({
-        status: 'completed',
-        completedAt: new Date(),
-        totalRecipients: total,
-      }).where(eq(campaigns.campaignId, campaignId));
-
-      console.log(`Campaign ${campaignId} completed. Sent ${delivered}/${total} SMS messages.`);
-    } catch (err) {
-      console.error('Error processing SMS SQS record:', err);
+  prepare(_campaign, template, settings) {
+    const originationNumber = settings?.smsPhoneNumber;
+    if (!originationNumber) {
+      return { configError: 'no_sms_origination_number' };
     }
-  }
+    return {
+      fromIdentity: originationNumber,
+      setup: { originationNumber, body: template.body || '' },
+    };
+  },
+
+  recipientOf(contact) {
+    return contact.phone;
+  },
+
+  suppressionHashOf: phoneSuppressionHash,
+
+  async sendBatch(claimed, setup): Promise<SendResult[]> {
+    const results: SendResult[] = [];
+    for (const { contact } of claimed) {
+      try {
+        const response = await smsClient.send(
+          new SendTextMessageCommand({
+            DestinationPhoneNumber: contact.phone!,
+            OriginationIdentity: setup.originationNumber,
+            MessageBody: mergeTags(setup.body, contact),
+            MessageType: 'PROMOTIONAL',
+          }),
+        );
+        results.push({ contactId: contact.contactId, ok: true, providerMessageId: response.MessageId ?? null });
+      } catch (err) {
+        if (isRetryableError(err)) {
+          throw new RetryableDispatchError('SMS send failed with retryable error', err);
+        }
+        results.push({ contactId: contact.contactId, ok: false, errorCode: errorCodeOf(err) });
+      }
+    }
+    return results;
+  },
 };
+
+export const handler = makeSqsHandler(createDispatchStore, smsAdapter);

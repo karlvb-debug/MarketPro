@@ -4,6 +4,7 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as sns from 'aws-cdk-lib/aws-sns';
 
 export class DatabaseStack extends cdk.Stack {
   public readonly vpc: ec2.Vpc;
@@ -11,9 +12,17 @@ export class DatabaseStack extends cdk.Stack {
   public readonly idempotencyTable: dynamodb.TableV2;
   public readonly dbSecret: secretsmanager.ISecret;
   public readonly lambdaSecurityGroup: ec2.SecurityGroup;
+  public readonly opsAlertsTopic: sns.Topic;
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
+
+    // Central ops alerting topic — CloudWatch alarms across all stacks
+    // publish here. Subscribe an email/PagerDuty endpoint out-of-band.
+    this.opsAlertsTopic = new sns.Topic(this, 'OpsAlertsTopic', {
+      topicName: 'marketing-saas-ops-alerts',
+      displayName: 'MarketPro operational alarms',
+    });
 
     // Create the VPC for RDS
     this.vpc = new ec2.Vpc(this, 'MarketingSaaSVpc', {

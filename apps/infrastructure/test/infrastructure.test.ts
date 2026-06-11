@@ -66,6 +66,7 @@ describe('EmailStack', () => {
       lambdaSecurityGroup: db.lambdaSecurityGroup,
       database: db.database,
       dbSecret: db.dbSecret,
+      opsAlertsTopic: db.opsAlertsTopic,
     });
     template = Template.fromStack(stack);
   });
@@ -74,12 +75,30 @@ describe('EmailStack', () => {
     template.resourceCountIs('AWS::SQS::Queue', 2);
     template.hasResourceProperties('AWS::SQS::Queue', {
       RedrivePolicy: Match.objectLike({ maxReceiveCount: 3 }),
-      VisibilityTimeout: 300,
+      VisibilityTimeout: 1800,
     });
   });
 
-  test('wires the queue to the dispatch Lambda via event source mapping', () => {
+  test('processes one campaign per invocation with partial batch failures', () => {
     template.resourceCountIs('AWS::Lambda::EventSourceMapping', 1);
+    template.hasResourceProperties('AWS::Lambda::EventSourceMapping', {
+      BatchSize: 1,
+      FunctionResponseTypes: ['ReportBatchItemFailures'],
+    });
+  });
+
+  test('alarms on DLQ depth and Lambda errors, wired to the ops topic', () => {
+    template.resourceCountIs('AWS::CloudWatch::Alarm', 2);
+    template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+      MetricName: 'ApproximateNumberOfMessagesVisible',
+      Threshold: 1,
+      AlarmActions: Match.anyValue(),
+    });
+    template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+      MetricName: 'Errors',
+      Namespace: 'AWS/Lambda',
+      Threshold: 1,
+    });
   });
 
   test('dispatch Lambda reads DB credentials from Secrets Manager', () => {

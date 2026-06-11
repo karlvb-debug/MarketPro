@@ -8,13 +8,16 @@ import * as lambdaEventSources from "aws-cdk-lib/aws-lambda-event-sources";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
+import * as sns from "aws-cdk-lib/aws-sns";
 import * as path from "path";
+import { addDispatchAlarms } from "./monitoring";
 
 export interface EmailStackProps extends cdk.StackProps {
   vpc: ec2.Vpc;
   lambdaSecurityGroup: ec2.SecurityGroup;
   database: rds.DatabaseInstance;
   dbSecret: secretsmanager.ISecret;
+  opsAlertsTopic: sns.ITopic;
 }
 
 export class EmailStack extends cdk.Stack {
@@ -46,7 +49,9 @@ export class EmailStack extends cdk.Stack {
     });
 
     this.emailDispatchQueue = new sqs.Queue(this, "EmailDispatchQueue", {
-      visibilityTimeout: cdk.Duration.seconds(300),
+      // 6x the Lambda timeout (AWS guidance) so an in-flight campaign is
+      // never delivered to a second consumer while the first still runs.
+      visibilityTimeout: cdk.Duration.seconds(1800),
       retentionPeriod: cdk.Duration.days(4),
       deadLetterQueue: {
         queue: emailDispatchDlq,
@@ -94,12 +99,22 @@ export class EmailStack extends cdk.Stack {
       }),
     );
 
-    // 4. Add SQS as event source
+    // 4. Add SQS as event source — one campaign per invocation, with partial
+    // batch failure reporting so only retryable records are redelivered.
     dispatchLambda.addEventSource(
       new lambdaEventSources.SqsEventSource(this.emailDispatchQueue, {
-        batchSize: 10,
+        batchSize: 1,
+        reportBatchItemFailures: true,
       }),
     );
+
+    // 5. Alarms: DLQ depth + Lambda errors → ops topic
+    addDispatchAlarms(this, {
+      prefix: "Email",
+      dlq: emailDispatchDlq,
+      fn: dispatchLambda,
+      alarmTopic: props.opsAlertsTopic,
+    });
 
     // Outputs
     new cdk.CfnOutput(this, "EmailDispatchQueueUrl", {

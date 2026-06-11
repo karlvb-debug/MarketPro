@@ -266,6 +266,11 @@ export const campaignMessages = pgTable('campaign_messages', {
   contactIdx: index('campaign_messages_contact_idx').on(table.contactId),
   workspaceIdx: index('campaign_messages_workspace_idx').on(table.workspaceId),
   statusIdx: index('campaign_messages_status_idx').on(table.campaignId, table.status),
+  // Dispatch idempotency: one message row per (campaign, contact). Dispatch
+  // Lambdas claim recipients via INSERT ... ON CONFLICT DO NOTHING so SQS
+  // redelivery can never double-send. NULL contact_id (GDPR-anonymized rows)
+  // is exempt per Postgres unique-index NULL semantics.
+  campaignContactUniq: uniqueIndex('campaign_messages_campaign_contact_uniq').on(table.campaignId, table.contactId),
 }));
 
 // ============================================

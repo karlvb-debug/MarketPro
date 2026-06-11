@@ -1,269 +1,138 @@
-import { SQSEvent, SQSHandler } from "aws-lambda";
 import {
   ConnectCampaignsClient,
   PutDialRequestBatchCommand,
-} from "@aws-sdk/client-connectcampaigns";
-import { eq, and } from "drizzle-orm";
-import { getDb } from "../lib/db";
-import {
-  campaigns,
-  callScripts,
-  contacts,
-  contactSegment,
-  workspaceSettings,
-  campaignMessages,
-  suppressionList,
-} from "../../drizzle/schema";
-import * as crypto from "crypto";
+} from '@aws-sdk/client-connectcampaigns';
+import { and, eq } from 'drizzle-orm';
+import { getDb } from '../lib/db';
+import { callScripts } from '../../drizzle/schema';
+import { makeSqsHandler } from './core/engine';
+import { createDispatchStore } from './core/store';
+import { isRetryableError, errorCodeOf, RetryableDispatchError } from './core/errors';
+import { phoneSuppressionHash, toE164 } from './core/personalize';
+import { ChannelAdapter, ClaimedRecipient, SendResult } from './core/types';
 
 const campaignsClient = new ConnectCampaignsClient({});
-const CAMPAIGN_ID = process.env.CONNECT_CAMPAIGN_ID;
 
-export const handler: SQSHandler = async (event: SQSEvent) => {
-  const db = await getDb();
+// PutDialRequestBatch hard limit
+const DIAL_BATCH_SIZE = 25;
+// Dial requests expire if Connect hasn't placed the call within this window
+const DIAL_EXPIRATION_MS = 2 * 60 * 60 * 1000;
 
-  for (const record of event.Records) {
-    try {
-      const payload = JSON.parse(record.body);
-      const { campaignId, workspaceId } = payload;
+interface VoiceTemplate {
+  ssmlContent: string | null;
+  voicemailSsml: string | null;
+  voiceId: string | null;
+}
 
-      if (!campaignId || !workspaceId) {
-        console.error("Invalid payload:", payload);
-        continue;
-      }
+interface VoiceSetup {
+  connectCampaignId: string;
+  sourcePhoneNumber: string;
+  template: VoiceTemplate;
+  workspaceId: string;
+}
 
-      console.log(
-        `Processing Voice campaign ${campaignId} for workspace ${workspaceId}`,
-      );
+const voiceAdapter: ChannelAdapter<VoiceTemplate, VoiceSetup> = {
+  channel: 'voice',
+  suppressionHashKind: 'phone',
 
-      // 1. Fetch Campaign
-      const [campaign] = await db
-        .select()
-        .from(campaigns)
-        .where(
-          and(
-            eq(campaigns.campaignId, campaignId),
-            eq(campaigns.workspaceId, workspaceId),
-          ),
-        );
+  async fetchTemplate(templateId, workspaceId) {
+    const db = await getDb();
+    const [row] = await db
+      .select({
+        ssmlContent: callScripts.ssmlContent,
+        voicemailSsml: callScripts.voicemailSsml,
+        voiceId: callScripts.voiceId,
+      })
+      .from(callScripts)
+      .where(and(eq(callScripts.scriptId, templateId), eq(callScripts.workspaceId, workspaceId)));
+    return row;
+  },
 
-      if (
-        !campaign ||
-        campaign.status === "completed" ||
-        campaign.status === "cancelled"
-      ) {
-        console.log(`Campaign ${campaignId} not found or already processed.`);
-        continue;
-      }
-
-      // 2. Fetch Call Script (Template)
-      const [template] = await db
-        .select()
-        .from(callScripts)
-        .where(
-          and(
-            eq(callScripts.scriptId, campaign.templateId),
-            eq(callScripts.workspaceId, workspaceId),
-          ),
-        );
-
-      if (!template) {
-        console.error(`Call Script not found for campaign ${campaignId}`);
-        continue;
-      }
-
-      // 3. Fetch Workspace Settings
-      const [settings] = await db
-        .select()
-        .from(workspaceSettings)
-        .where(eq(workspaceSettings.workspaceId, workspaceId));
-
-      const sourcePhoneNumber = settings?.voicePhoneNumber;
-      if (!sourcePhoneNumber) {
-        console.error(
-          `No Voice phone number configured for workspace ${workspaceId}`,
-        );
-        await db
-          .update(campaigns)
-          .set({ status: "cancelled" })
-          .where(eq(campaigns.campaignId, campaignId));
-        continue;
-      }
-
-      // 4. Fetch Segment Contacts
-      const segmentContactsResult = await db
-        .select({
-          contact: contacts,
-        })
-        .from(contactSegment)
-        .innerJoin(contacts, eq(contactSegment.contactId, contacts.contactId))
-        .where(
-          and(
-            eq(contactSegment.segmentId, campaign.segmentId),
-            eq(contacts.status, "active"),
-          ),
-        );
-
-      // 4.5 Fetch Suppression List
-      const suppressions = await db
-        .select({ phoneHash: suppressionList.phoneHash })
-        .from(suppressionList)
-        .where(eq(suppressionList.workspaceId, workspaceId));
-
-      const suppressedHashes = new Set(
-        suppressions.map((s: any) => s.phoneHash).filter(Boolean),
-      );
-
-      // 5. Build Dial Requests
-      const dialRequests = [];
-      const contactMap = new Map<string, any>(); // Map clientToken to contact info
-
-      for (const { contact } of segmentContactsResult) {
-        if (!contact.phone) continue;
-
-        const phoneNorm = contact.phone.replace(/\D/g, "");
-        let phoneE164 = contact.phone.trim();
-        if (!phoneE164.startsWith("+")) {
-          const cleanDigits = phoneE164.replace(/\D/g, "");
-          if (cleanDigits.length === 10) {
-            phoneE164 = `+1${cleanDigits}`;
-          } else {
-            phoneE164 = `+${cleanDigits}`;
-          }
-        }
-
-        const phoneHash = crypto
-          .createHash("sha256")
-          .update(phoneNorm)
-          .digest("hex");
-        if (suppressedHashes.has(phoneHash)) {
-          console.log(
-            `Phone ${contact.phone} is in suppression list, skipping voice call.`,
-          );
-          continue;
-        }
-
-        const clientToken = crypto.randomUUID();
-
-        // 2 hours from now expiration time
-        const expirationTime = new Date(Date.now() + 2 * 60 * 60 * 1000);
-
-        dialRequests.push({
-          clientToken,
-          phoneNumber: phoneE164,
-          expirationTime,
-          attributes: {
-            FirstName: contact.firstName || "",
-            LastName: contact.lastName || "",
-            Company: contact.company || "",
-            VoiceId: template.voiceId || "Joanna",
-            SSMLContent: template.ssmlContent || "<speak>Hello</speak>",
-            VoicemailSSML:
-              template.voicemailSsml ||
-              template.ssmlContent ||
-              "<speak>Hello</speak>",
-            WorkspaceId: workspaceId.toString(),
-          },
-        });
-
-        contactMap.set(clientToken, { contact, phoneNumber: phoneE164 });
-      }
-
-      let delivered = 0;
-      const total = segmentContactsResult.length;
-
-      // 6. Submit Dial Requests in chunks of 25 (PutDialRequestBatch max limit)
-      const chunkSize = 25;
-      for (let i = 0; i < dialRequests.length; i += chunkSize) {
-        const chunk = dialRequests.slice(i, i + chunkSize);
-
-        try {
-          const response = await campaignsClient.send(
-            new PutDialRequestBatchCommand({
-              id: CAMPAIGN_ID,
-              dialRequests: chunk,
-            }),
-          );
-
-          const failedMap = new Map<string, string>();
-          if (response.failedRequests) {
-            for (const fail of response.failedRequests) {
-              if (fail.clientToken && fail.failureCode) {
-                failedMap.set(fail.clientToken, fail.failureCode);
-              }
-            }
-          }
-
-          // Log each request
-          for (const req of chunk) {
-            const mapped = contactMap.get(req.clientToken);
-            if (!mapped) continue;
-
-            const { contact } = mapped;
-            const failureReason = failedMap.get(req.clientToken);
-
-            if (failureReason) {
-              console.error(
-                `Failed to dispatch call to ${req.phoneNumber}: ${failureReason}`,
-              );
-              await db.insert(campaignMessages).values({
-                campaignId,
-                workspaceId,
-                contactId: contact.contactId,
-                channel: "voice",
-                status: "failed",
-                fromIdentity: sourcePhoneNumber,
-                errorCode: failureReason.substring(0, 100),
-              });
-            } else {
-              await db.insert(campaignMessages).values({
-                campaignId,
-                workspaceId,
-                contactId: contact.contactId,
-                channel: "voice",
-                status: "queued",
-                fromIdentity: sourcePhoneNumber,
-                sentAt: new Date(),
-                providerMessageId: req.clientToken,
-              });
-              delivered++;
-            }
-          }
-        } catch (err: any) {
-          console.error(`Failed to dispatch batch:`, err.message);
-          for (const req of chunk) {
-            const mapped = contactMap.get(req.clientToken);
-            if (!mapped) continue;
-            const { contact } = mapped;
-
-            await db.insert(campaignMessages).values({
-              campaignId,
-              workspaceId,
-              contactId: contact.contactId,
-              channel: "voice",
-              status: "failed",
-              fromIdentity: sourcePhoneNumber,
-              errorCode: err.message?.substring(0, 100),
-            });
-          }
-        }
-      }
-
-      // 7. Complete Campaign Dispatch
-      await db
-        .update(campaigns)
-        .set({
-          status: "completed",
-          completedAt: new Date(),
-          totalRecipients: total,
-        })
-        .where(eq(campaigns.campaignId, campaignId));
-
-      console.log(
-        `Campaign ${campaignId} dispatch completed. Queued ${delivered}/${total} calls.`,
-      );
-    } catch (err) {
-      console.error("Error processing Voice SQS record:", err);
+  prepare(campaign, template, settings) {
+    const connectCampaignId = process.env.CONNECT_CAMPAIGN_ID;
+    if (!connectCampaignId) {
+      return { configError: 'connect_campaign_not_configured' };
     }
-  }
+    const sourcePhoneNumber = settings?.voicePhoneNumber;
+    if (!sourcePhoneNumber) {
+      return { configError: 'no_voice_phone_number' };
+    }
+    return {
+      fromIdentity: sourcePhoneNumber,
+      setup: {
+        connectCampaignId,
+        sourcePhoneNumber,
+        template,
+        workspaceId: campaign.workspaceId,
+      },
+    };
+  },
+
+  recipientOf(contact) {
+    return contact.phone;
+  },
+
+  suppressionHashOf: phoneSuppressionHash,
+
+  async sendBatch(claimed, setup, logger): Promise<SendResult[]> {
+    const results: SendResult[] = [];
+
+    for (let i = 0; i < claimed.length; i += DIAL_BATCH_SIZE) {
+      const chunk = claimed.slice(i, i + DIAL_BATCH_SIZE);
+      // clientToken = our campaign_messages PK, so retried API calls are
+      // idempotent on the Connect side as well.
+      const dialRequests = chunk.map(({ messageId, contact }: ClaimedRecipient) => ({
+        clientToken: messageId,
+        phoneNumber: toE164(contact.phone!),
+        expirationTime: new Date(Date.now() + DIAL_EXPIRATION_MS),
+        attributes: {
+          FirstName: contact.firstName || '',
+          LastName: contact.lastName || '',
+          Company: contact.company || '',
+          VoiceId: setup.template.voiceId || 'Joanna',
+          SSMLContent: setup.template.ssmlContent || '<speak>Hello</speak>',
+          VoicemailSSML:
+            setup.template.voicemailSsml || setup.template.ssmlContent || '<speak>Hello</speak>',
+          WorkspaceId: setup.workspaceId,
+        },
+      }));
+
+      try {
+        const response = await campaignsClient.send(
+          new PutDialRequestBatchCommand({
+            id: setup.connectCampaignId,
+            dialRequests,
+          }),
+        );
+
+        const failedByToken = new Map<string, string>();
+        for (const fail of response.failedRequests ?? []) {
+          if (fail.clientToken) {
+            failedByToken.set(fail.clientToken, fail.failureCode || 'UnknownFailure');
+          }
+        }
+
+        for (const { messageId, contact } of chunk) {
+          const failureCode = failedByToken.get(messageId);
+          if (failureCode) {
+            results.push({ contactId: contact.contactId, ok: false, errorCode: failureCode });
+          } else {
+            results.push({ contactId: contact.contactId, ok: true, providerMessageId: messageId });
+          }
+        }
+      } catch (err) {
+        if (isRetryableError(err)) {
+          throw new RetryableDispatchError('Connect dial batch failed with retryable error', err);
+        }
+        logger.error('Dial batch rejected — marking chunk failed', err);
+        for (const { contact } of chunk) {
+          results.push({ contactId: contact.contactId, ok: false, errorCode: errorCodeOf(err) });
+        }
+      }
+    }
+
+    return results;
+  },
 };
+
+export const handler = makeSqsHandler(createDispatchStore, voiceAdapter);

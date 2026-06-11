@@ -201,6 +201,16 @@ CREATE TABLE IF NOT EXISTS campaign_messages (
 CREATE INDEX IF NOT EXISTS campaign_messages_campaign_idx ON campaign_messages (campaign_id);
 CREATE INDEX IF NOT EXISTS campaign_messages_workspace_idx ON campaign_messages (workspace_id);
 
+-- Dispatch idempotency: one message row per (campaign, contact).
+-- Dedup any legacy duplicates (keep the earliest row) before creating the index.
+DELETE FROM campaign_messages a
+USING campaign_messages b
+WHERE a.campaign_id = b.campaign_id
+  AND a.contact_id = b.contact_id
+  AND a.contact_id IS NOT NULL
+  AND a.message_id > b.message_id;
+CREATE UNIQUE INDEX IF NOT EXISTS campaign_messages_campaign_contact_uniq ON campaign_messages (campaign_id, contact_id);
+
 CREATE TABLE IF NOT EXISTS sms_inbox (
     message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,

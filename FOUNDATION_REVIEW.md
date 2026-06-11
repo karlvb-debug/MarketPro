@@ -88,15 +88,16 @@ Phase-by-phase reality vs. the claims in `TODO.md` / `architecture_plan.md`:
 - Transitive advisories pinned by upstream: `postcss@8.4.31` (pinned by Next), `js-cookie@2.x` (pinned by `amazon-cognito-identity-js`), old `esbuild` (drizzle-kit dev toolchain). Revisit via Dependabot as upstreams release.
 - Leaked identifiers remain in **git history** (account ID, Cognito pool/client IDs, RDS hostname). They are not credentials; rotating means recreating the Cognito pool / RDS endpoint or history rewrite — owner decision, not done.
 
-### Milestone 1 — Dispatch reliability (≈2 weeks)
+### Milestone 1 — Dispatch reliability (≈2 weeks) — ✅ DONE (June 11, 2026)
 *Goal: a campaign send is exactly-once, resumable, and observable.*
 
-- [ ] Paginate segment fetches in all three dispatch Lambdas (keyset batches, e.g. 500 contacts/iteration).
-- [ ] Make dispatch idempotent: per-recipient send markers (DynamoDB or `campaign_messages` unique constraint) so SQS redelivery never re-sends.
-- [ ] Error-handling triage: rethrow retryable errors (DB/network) so SQS retries; only swallow true poison pills; record per-recipient failures.
-- [ ] Extract a shared dispatch core (fetch campaign/template/contacts, merge tags, suppression check, logging) used by all three channel Lambdas; share the DB client with the authorizer.
-- [ ] CloudWatch alarms: DLQ depth > 0, Lambda error rate, RDS connections/CPU; structured JSON logging (lambda-powertools).
-- [ ] DLQ redrive runbook or consumer Lambda.
+- [x] Paginate segment fetches: keyset pagination (500/page) in a shared engine; suppression checked per page via hash `IN` query — bounded memory at any segment size.
+- [x] Per-recipient idempotency: unique `(campaign_id, contact_id)` index + claim rows via `INSERT … ON CONFLICT DO NOTHING RETURNING`. SQS redelivery skips claimed recipients; interrupted campaigns resume. At-most-once by design (duplicates worse than misses); stale-claim reconciliation documented in the runbook.
+- [x] Error triage: `isRetryableError` (DB/network/throttle/5xx) → SQS partial batch failure → retry → DLQ; provider 4xx → `failed` message row, campaign continues; missing template/config cancels the campaign instead of leaving it stuck in `sending`.
+- [x] Shared dispatch core (`lambda/dispatch/core/`): engine + injected store + channel adapters; voice uses `clientToken = message_id` for Connect-side idempotency; authorizer now shares `getPool()` from `lib/db`.
+- [x] CloudWatch alarms (DLQ depth ≥ 1, Lambda errors ≥ 1) → `marketing-saas-ops-alerts` SNS topic; structured JSON logging via `lib/logger`. (RDS CPU/connection alarms deferred to M5 with the Multi-AZ work.)
+- [x] DLQ redrive runbook: `docs/runbooks/dispatch-dlq.md`.
+- [x] Infra hardening: `batchSize: 1` + `reportBatchItemFailures`, SMS/voice Lambda timeouts 30s→300s, queue visibility 6× function timeout. 24 new unit tests (engine, error triage) + CDK assertions.
 
 ### Milestone 2 — Billing correctness (≈2 weeks)
 *Goal: nobody can spend money they don't have; nobody gets double-charged.*

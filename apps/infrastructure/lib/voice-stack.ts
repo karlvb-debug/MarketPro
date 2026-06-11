@@ -9,13 +9,16 @@ import * as lambdaEventSources from "aws-cdk-lib/aws-lambda-event-sources";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
+import * as sns from "aws-cdk-lib/aws-sns";
 import * as path from "path";
+import { addDispatchAlarms } from "./monitoring";
 
 export interface VoiceStackProps extends cdk.StackProps {
   vpc: ec2.Vpc;
   lambdaSecurityGroup: ec2.SecurityGroup;
   database: rds.DatabaseInstance;
   dbSecret: secretsmanager.ISecret;
+  opsAlertsTopic: sns.ITopic;
 }
 
 export class VoiceStack extends cdk.Stack {
@@ -85,7 +88,9 @@ export class VoiceStack extends cdk.Stack {
     });
 
     this.voiceDispatchQueue = new sqs.Queue(this, "VoiceDispatchQueue", {
-      visibilityTimeout: cdk.Duration.seconds(30),
+      // 6x the Lambda timeout (AWS guidance) so an in-flight campaign is
+      // never delivered to a second consumer while the first still runs.
+      visibilityTimeout: cdk.Duration.seconds(1800),
       retentionPeriod: cdk.Duration.days(4),
       deadLetterQueue: {
         queue: voiceDispatchDlq,
@@ -120,7 +125,8 @@ export class VoiceStack extends cdk.Stack {
         entry: path.join(__dirname, "../lambda/dispatch/dispatch-voice.ts"),
         handler: "handler",
         memorySize: 512,
-        timeout: cdk.Duration.seconds(30),
+        // Campaign dispatch paginates the whole segment in one invocation
+        timeout: cdk.Duration.seconds(300),
         vpc: props.vpc,
         vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
         securityGroups: [props.lambdaSecurityGroup],
@@ -165,12 +171,22 @@ export class VoiceStack extends cdk.Stack {
       }),
     );
 
-    // 7. Add SQS as event source
+    // 7. Add SQS as event source — one campaign per invocation, with partial
+    // batch failure reporting so only retryable records are redelivered.
     dispatchLambda.addEventSource(
       new lambdaEventSources.SqsEventSource(this.voiceDispatchQueue, {
-        batchSize: 10,
+        batchSize: 1,
+        reportBatchItemFailures: true,
       }),
     );
+
+    // 8. Alarms: DLQ depth + Lambda errors → ops topic
+    addDispatchAlarms(this, {
+      prefix: "Voice",
+      dlq: voiceDispatchDlq,
+      fn: dispatchLambda,
+      alarmTopic: props.opsAlertsTopic,
+    });
 
     // Outputs
     new cdk.CfnOutput(this, "AmazonConnectInstanceAlias", {

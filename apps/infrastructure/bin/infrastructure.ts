@@ -31,6 +31,7 @@ const emailStack = new EmailStack(app, 'MarketingSaaSEmailStack', {
   lambdaSecurityGroup: databaseStack.lambdaSecurityGroup,
   database: databaseStack.database,
   dbSecret: databaseStack.dbSecret,
+  opsAlertsTopic: databaseStack.opsAlertsTopic,
 });
 emailStack.addDependency(databaseStack);
 
@@ -41,6 +42,7 @@ const smsStack = new SmsStack(app, 'MarketingSaaSSmsStack', {
   lambdaSecurityGroup: databaseStack.lambdaSecurityGroup,
   database: databaseStack.database,
   dbSecret: databaseStack.dbSecret,
+  opsAlertsTopic: databaseStack.opsAlertsTopic,
 });
 smsStack.addDependency(databaseStack);
 
@@ -51,6 +53,7 @@ const voiceStack = new VoiceStack(app, 'MarketingSaaSVoiceStack', {
   lambdaSecurityGroup: databaseStack.lambdaSecurityGroup,
   database: databaseStack.database,
   dbSecret: databaseStack.dbSecret,
+  opsAlertsTopic: databaseStack.opsAlertsTopic,
 });
 voiceStack.addDependency(databaseStack);
 

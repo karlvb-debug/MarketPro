@@ -1,6 +1,6 @@
 import { APIGatewayRequestAuthorizerEvent, APIGatewayAuthorizerResult } from 'aws-lambda';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
-import { Pool } from 'pg';
+import { getPool } from './lib/db';
 
 // ============================================
 // Workspace Authorizer — JWT verification + RBAC enforcement
@@ -14,39 +14,6 @@ const verifier = CognitoJwtVerifier.create({
   tokenUse: 'id',
   clientId: process.env.APP_CLIENT_ID || 'xxxxxxxxxxxxxx',
 });
-
-// 2. Reusable PG connection pool (warm-start friendly)
-let pool: Pool | null = null;
-
-async function getPool(): Promise<Pool> {
-  if (pool) return pool;
-
-  const secretArn = process.env.DATABASE_SECRET_ARN;
-  const dbHost = process.env.DATABASE_HOST;
-  const dbName = process.env.DATABASE_NAME || 'marketingsaas';
-
-  let connectionString: string;
-
-  if (secretArn) {
-    const { SecretsManagerClient, GetSecretValueCommand } = await import('@aws-sdk/client-secrets-manager');
-    const smClient = new SecretsManagerClient({});
-    const secret = await smClient.send(new GetSecretValueCommand({ SecretId: secretArn }));
-    const creds = JSON.parse(secret.SecretString || '{}');
-    connectionString = `postgresql://${creds.username}:${encodeURIComponent(creds.password)}@${dbHost || creds.host}:${creds.port || 5432}/${dbName}`;
-  } else {
-    connectionString = process.env.DATABASE_URL || '';
-  }
-
-  pool = new Pool({
-    connectionString,
-    max: 1,
-    idleTimeoutMillis: 60000,
-    connectionTimeoutMillis: 5000,
-    ssl: connectionString.includes('localhost') ? undefined : { rejectUnauthorized: false },
-  });
-
-  return pool;
-}
 
 /**
  * Query users_workspaces to resolve the caller's role in the requested workspace.
