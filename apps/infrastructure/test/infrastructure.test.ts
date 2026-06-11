@@ -125,6 +125,7 @@ describe('BillingStack', () => {
       database: db.database,
       dbSecret: db.dbSecret,
       idempotencyTable: db.idempotencyTable,
+      opsAlertsTopic: db.opsAlertsTopic,
     });
     template = Template.fromStack(stack);
   });
@@ -156,6 +157,19 @@ describe('BillingStack', () => {
     expect(vars.STRIPE_SECRET_KEY).toBeUndefined();
     expect(vars.STRIPE_WEBHOOK_SECRET).toBeUndefined();
     expect(vars.DATABASE_URL).toBeUndefined();
+  });
+
+  test('schedules the nightly reconciliation sweep', () => {
+    template.hasResourceProperties('AWS::Events::Rule', {
+      ScheduleExpression: 'cron(0 3 * * ? *)',
+      State: 'ENABLED',
+    });
+  });
+
+  test('billing queue reports partial batch failures', () => {
+    template.hasResourceProperties('AWS::Lambda::EventSourceMapping', {
+      FunctionResponseTypes: ['ReportBatchItemFailures'],
+    });
   });
 
   test('exposes the Stripe webhook endpoint on API Gateway', () => {

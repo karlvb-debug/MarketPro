@@ -258,12 +258,16 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       const phoneOnly = rawRows.filter((c: any) => !c.email?.trim() && c.phone?.trim());
       const rejected = rawRows.length - withEmail.length - phoneOnly.length;
 
-      let imported = 0;
+      // All three passes commit or roll back together: a failure in the
+      // phone-only pass or the segment association must not leave orphaned
+      // half-imported contacts.
+      const imported = await db.transaction(async (tx) => {
+      let importedCount = 0;
       const contactIds: string[] = [];
 
       // Pass 1: Upsert contacts WITH email (deduplicate on workspace + email)
       if (withEmail.length > 0) {
-        const result = await db
+        const result = await tx
           .insert(contacts)
           .values(withEmail.map(toValues))
           .onConflictDoUpdate({
@@ -280,13 +284,13 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
             },
           })
           .returning({ contactId: contacts.contactId });
-        imported += result.length;
+        importedCount += result.length;
         contactIds.push(...result.map((r) => r.contactId));
       }
 
       // Pass 2: Upsert phone-only contacts (deduplicate on workspace + phone)
       if (phoneOnly.length > 0) {
-        const result = await db
+        const result = await tx
           .insert(contacts)
           .values(phoneOnly.map(toValues))
           .onConflictDoUpdate({
@@ -302,22 +306,25 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
             },
           })
           .returning({ contactId: contacts.contactId });
-        imported += result.length;
+        importedCount += result.length;
         contactIds.push(...result.map((r) => r.contactId));
       }
 
       // Pass 3: Associate with segment if segmentId is provided and contactIds is not empty
       if (segmentId && contactIds.length > 0) {
         // Verify segment belongs to this workspace
-        const [seg] = await db
+        const [seg] = await tx
           .select()
           .from(segments)
           .where(and(eq(segments.segmentId, segmentId), eq(segments.workspaceId, workspaceId)));
         if (seg) {
           const csRows = contactIds.map((cid) => ({ contactId: cid, segmentId }));
-          await db.insert(contactSegment).values(csRows).onConflictDoNothing();
+          await tx.insert(contactSegment).values(csRows).onConflictDoNothing();
         }
       }
+
+      return importedCount;
+      });
 
       return respond(200, { imported, rejected });
     }

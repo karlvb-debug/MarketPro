@@ -1,5 +1,6 @@
 import { and, eq, gt, inArray, ne, sql } from 'drizzle-orm';
 import { getDb } from '../../lib/db';
+import { DEFAULT_CHANNEL_PRICES } from '../../lib/billing';
 import {
   campaigns,
   contacts,
@@ -94,7 +95,19 @@ export async function createDispatchStore(): Promise<DispatchStore> {
       return new Set(rows.map((r) => r.hash).filter((h): h is string => Boolean(h)));
     },
 
-    async claimRecipients(campaign, channel, fromIdentity, batch): Promise<ClaimedRecipient[]> {
+    async fetchChannelPrice(workspaceId, channel): Promise<string> {
+      const [row] = await db
+        .select({
+          email: workspaceSettings.pricePerEmail,
+          sms: workspaceSettings.pricePerSms,
+          voice: workspaceSettings.pricePerVoice,
+        })
+        .from(workspaceSettings)
+        .where(eq(workspaceSettings.workspaceId, workspaceId));
+      return row?.[channel] ?? DEFAULT_CHANNEL_PRICES[channel];
+    },
+
+    async claimRecipients(campaign, channel, fromIdentity, batch, costPerMessage): Promise<ClaimedRecipient[]> {
       if (batch.length === 0) return [];
       const inserted = await db
         .insert(campaignMessages)
@@ -106,6 +119,7 @@ export async function createDispatchStore(): Promise<DispatchStore> {
             channel,
             status: 'queued' as const,
             fromIdentity,
+            cost: costPerMessage,
           })),
         )
         .onConflictDoNothing({

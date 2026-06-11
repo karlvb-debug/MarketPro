@@ -99,14 +99,18 @@ Phase-by-phase reality vs. the claims in `TODO.md` / `architecture_plan.md`:
 - [x] DLQ redrive runbook: `docs/runbooks/dispatch-dlq.md`.
 - [x] Infra hardening: `batchSize: 1` + `reportBatchItemFailures`, SMS/voice Lambda timeouts 30s→300s, queue visibility 6× function timeout. 24 new unit tests (engine, error triage) + CDK assertions.
 
-### Milestone 2 — Billing correctness (≈2 weeks)
+### Milestone 2 — Billing correctness (≈2 weeks) — ✅ DONE (June 11, 2026)
 *Goal: nobody can spend money they don't have; nobody gets double-charged.*
 
-- [ ] Call `authorize_campaign_funds()` at campaign schedule time; reject if insufficient balance; release/capture on delivery events.
-- [ ] Per-workspace pricing config table replacing the hardcoded `$0.01`.
-- [ ] Nightly reconciliation cron (EventBridge) sweeping stale holds > 72h.
-- [ ] Single transaction wrapping all passes of bulk contact import (currently pass 2 failure orphans pass 1 rows).
-- [ ] Integration tests for the ledger: auth → capture, auth → refund, duplicate event, concurrent capture.
+- [x] Authorization holds at send time (`lambda/lib/billing.ts`): campaigns API estimates recipients × price, places an atomic conditional hold (available → hold + PENDING ledger row), returns **402** with required/available amounts when funds are insufficient — campaign stays draft, nothing queued. The broken `authorize_campaign_funds()` SQL function (no balance check, swallowed errors) is dropped.
+- [x] Per-workspace pricing: `price_per_email/sms/voice` columns on `workspace_settings` (null = platform default); dispatch stamps the price on every claim row; billing capture settles each message at its stamped cost instead of the hardcoded `$0.01`.
+- [x] Capture lambda rewritten: resolves the dispatch claim row by `provider_message_id`, idempotency key now includes event type (a bounce after a delivery is no longer silently skipped), `send` events ignored (capturing on send AND delivery double-charged), partial batch failures, marks rows delivered/bounced.
+- [x] Nightly reconciliation: EventBridge cron (03:00 UTC) → `reconcile-billing.ts` releases the unsettled remainder of >72h-old PENDING holds; RECONCILED status prevents double-release; error alarm → ops topic.
+- [x] Stripe deposit UPSERTs the balance row (first-ever deposit used to update zero rows and vanish).
+- [x] Bulk contact import wrapped in a single transaction (passes 1–3 commit or roll back together).
+- [x] 13 Postgres integration tests run the real migration SQL and prove: auth/capture/refund math, insufficient-funds rejection, **concurrent authorizations can't overdraw**, concurrent settlements serialize, late events clamp at zero, sweep idempotency. CI runs them against a postgres:16 service.
+
+**Deferred within M2 scope:** future-scheduled campaigns are authorized when they fire (scheduled sends themselves are M5); auto-recharge below threshold is M6 (billing dashboard work).
 
 ### Milestone 3 — Compliance is real (≈2 weeks)
 *Goal: the legal claims in the architecture doc are true.*

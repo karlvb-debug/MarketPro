@@ -11,7 +11,12 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as eventsTargets from 'aws-cdk-lib/aws-events-targets';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
+import * as cloudwatchActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as path from 'path';
+import { addDispatchAlarms } from './monitoring';
 
 export interface BillingStackProps extends cdk.StackProps {
   vpc: ec2.Vpc;
@@ -19,6 +24,7 @@ export interface BillingStackProps extends cdk.StackProps {
   database: rds.DatabaseInstance;
   dbSecret: secretsmanager.ISecret;
   idempotencyTable: dynamodb.TableV2;
+  opsAlertsTopic: sns.ITopic;
 }
 
 export class BillingStack extends cdk.Stack {
@@ -80,10 +86,53 @@ export class BillingStack extends cdk.Stack {
     props.dbSecret.grantRead(billingCaptureLambda);
 
 
-    // Attach SQS as Event Source to Lambda
+    // Attach SQS as Event Source to Lambda — partial batch failures so one
+    // bad event doesn't force redelivery of the other nine.
     billingCaptureLambda.addEventSource(new lambdaEventSources.SqsEventSource(this.billingQueue, {
       batchSize: 10,
+      reportBatchItemFailures: true,
     }));
+
+    // Billing capture observability: DLQ depth + Lambda errors
+    addDispatchAlarms(this, {
+      prefix: 'Billing',
+      dlq: billingDlq,
+      fn: billingCaptureLambda,
+      alarmTopic: props.opsAlertsTopic,
+    });
+
+    // 5b. Nightly reconciliation — release stale (>72h) authorization holds
+    const reconcileLambda = new lambdaNodejs.NodejsFunction(this, 'ReconcileBillingFunction', {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      entry: path.join(__dirname, '../lambda/reconcile-billing.ts'),
+      handler: 'handler',
+      memorySize: 256,
+      timeout: cdk.Duration.minutes(5),
+      vpc: props.vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      securityGroups: [props.lambdaSecurityGroup],
+      environment: {
+        DATABASE_SECRET_ARN: props.dbSecret.secretArn,
+        DATABASE_HOST: props.database.instanceEndpoint.hostname,
+      },
+    });
+    props.dbSecret.grantRead(reconcileLambda);
+
+    new events.Rule(this, 'NightlyReconciliationRule', {
+      description: 'Sweep stale campaign authorization holds back to available credits',
+      schedule: events.Schedule.cron({ minute: '0', hour: '3' }), // 03:00 UTC daily
+      targets: [new eventsTargets.LambdaFunction(reconcileLambda, { retryAttempts: 2 })],
+    });
+
+    const reconcileErrorAlarm = new cloudwatch.Alarm(this, 'ReconcileErrorsAlarm', {
+      alarmDescription: 'Nightly billing reconciliation failed — stale holds are not being released.',
+      metric: reconcileLambda.metricErrors({ period: cdk.Duration.hours(24), statistic: 'Sum' }),
+      threshold: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      evaluationPeriods: 1,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    reconcileErrorAlarm.addAlarmAction(new cloudwatchActions.SnsAction(props.opsAlertsTopic));
 
     // 6. Deploy Stripe Webhook Lambda
     // Stripe secrets live in Secrets Manager (created out-of-band, referenced by name).

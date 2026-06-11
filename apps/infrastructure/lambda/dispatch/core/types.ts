@@ -92,9 +92,13 @@ export interface DispatchStore {
     hashes: string[],
   ): Promise<Set<string>>;
 
+  /** Per-message price for this workspace/channel (numeric string, 6dp). */
+  fetchChannelPrice(workspaceId: string, channel: 'email' | 'sms' | 'voice'): Promise<string>;
+
   /**
    * Insert 'queued' claim rows for the given contacts with
-   * ON CONFLICT (campaign_id, contact_id) DO NOTHING.
+   * ON CONFLICT (campaign_id, contact_id) DO NOTHING, stamping the
+   * per-message cost used later by billing capture.
    * Returns only the recipients actually claimed by THIS call.
    */
   claimRecipients(
@@ -102,6 +106,7 @@ export interface DispatchStore {
     channel: 'email' | 'sms' | 'voice',
     fromIdentity: string,
     contacts: DispatchContact[],
+    costPerMessage: string,
   ): Promise<ClaimedRecipient[]>;
 
   markSent(messageId: string, providerMessageId: string | null): Promise<void>;

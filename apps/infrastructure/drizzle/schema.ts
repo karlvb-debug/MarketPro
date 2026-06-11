@@ -271,6 +271,8 @@ export const campaignMessages = pgTable('campaign_messages', {
   // redelivery can never double-send. NULL contact_id (GDPR-anonymized rows)
   // is exempt per Postgres unique-index NULL semantics.
   campaignContactUniq: uniqueIndex('campaign_messages_campaign_contact_uniq').on(table.campaignId, table.contactId),
+  // Billing capture resolves delivery events by provider message id
+  providerMessageIdx: index('campaign_messages_provider_idx').on(table.providerMessageId),
 }));
 
 // ============================================
@@ -366,6 +368,10 @@ export const workspaceSettings = pgTable('workspace_settings', {
   // Compliance — DNC
   lastDncScrubDate: timestamp('last_dnc_scrub_date', { withTimezone: true }),
   sanNumber: varchar('san_number', { length: 50 }),
+  // Per-workspace message pricing (null = platform default)
+  pricePerEmail: numeric('price_per_email', { precision: 15, scale: 6 }),
+  pricePerSms: numeric('price_per_sms', { precision: 15, scale: 6 }),
+  pricePerVoice: numeric('price_per_voice', { precision: 15, scale: 6 }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 

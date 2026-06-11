@@ -67,6 +67,10 @@ export async function processCampaignDispatch<TTemplate, TSetup>(
   }
   const { setup, fromIdentity } = prepared;
 
+  // Stamped on every claim row; billing capture settles per-message
+  // charges against the campaign's authorization hold using this cost.
+  const costPerMessage = await store.fetchChannelPrice(workspaceId, adapter.channel);
+
   let sent = 0;
   let failed = 0;
   let skippedSuppressed = 0;
@@ -92,7 +96,7 @@ export async function processCampaignDispatch<TTemplate, TSetup>(
     }
 
     if (targets.length > 0) {
-      const claimed = await store.claimRecipients(campaign, adapter.channel, fromIdentity, targets);
+      const claimed = await store.claimRecipients(campaign, adapter.channel, fromIdentity, targets, costPerMessage);
       skippedAlreadyClaimed += targets.length - claimed.length;
 
       if (claimed.length > 0) {

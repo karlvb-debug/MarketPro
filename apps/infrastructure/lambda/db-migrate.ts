@@ -5,7 +5,8 @@
 
 import { Pool } from 'pg';
 
-const SCHEMA_SQL = `
+// Exported so integration tests can apply the real schema to a test database
+export const SCHEMA_SQL = `
 -- ENUMS
 DO $$ BEGIN
   CREATE TYPE transaction_type AS ENUM ('AUTHORIZATION', 'CAPTURE', 'REFUND', 'DEPOSIT');
@@ -342,26 +343,10 @@ CREATE TABLE IF NOT EXISTS form_submissions (
     read_at TIMESTAMP WITH TIME ZONE
 );
 
--- Stored procedure
-CREATE OR REPLACE FUNCTION authorize_campaign_funds(
-    p_workspace_id UUID,
-    p_amount NUMERIC(15, 6),
-    p_reference_id VARCHAR
-) RETURNS BOOLEAN AS $$
-BEGIN
-    UPDATE account_balances
-    SET available_credits = available_credits - p_amount,
-        hold_credits = hold_credits + p_amount
-    WHERE workspace_id = p_workspace_id;
-
-    INSERT INTO transactions_ledger (workspace_id, type, amount, reference_id)
-    VALUES (p_workspace_id, 'AUTHORIZATION', p_amount, p_reference_id);
-
-    RETURN TRUE;
-EXCEPTION WHEN OTHERS THEN
-    RETURN FALSE;
-END;
-$$ LANGUAGE plpgsql;
+-- authorize_campaign_funds() removed: it neither checked the balance nor
+-- surfaced errors (EXCEPTION WHEN OTHERS RETURN FALSE). Authorization holds
+-- now live in lambda/lib/billing.ts with an atomic conditional UPDATE.
+DROP FUNCTION IF EXISTS authorize_campaign_funds(UUID, NUMERIC, VARCHAR);
 
 -- ============================================
 -- ADDITIVE MIGRATIONS — safe to re-run (IF NOT EXISTS)
@@ -369,6 +354,14 @@ $$ LANGUAGE plpgsql;
 -- ============================================
 
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS state VARCHAR(2);
+
+-- Per-workspace message pricing (null = platform default)
+ALTER TABLE workspace_settings ADD COLUMN IF NOT EXISTS price_per_email NUMERIC(15, 6);
+ALTER TABLE workspace_settings ADD COLUMN IF NOT EXISTS price_per_sms NUMERIC(15, 6);
+ALTER TABLE workspace_settings ADD COLUMN IF NOT EXISTS price_per_voice NUMERIC(15, 6);
+
+-- Billing capture resolves delivery events by provider message id
+CREATE INDEX IF NOT EXISTS campaign_messages_provider_idx ON campaign_messages (provider_message_id);
 
 -- Enable pg_trgm for fast ILIKE %search% queries (prevents full table scans)
 CREATE EXTENSION IF NOT EXISTS pg_trgm;

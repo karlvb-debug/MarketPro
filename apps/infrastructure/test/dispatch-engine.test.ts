@@ -30,6 +30,7 @@ interface MessageRow {
   status: 'queued' | 'sent' | 'failed';
   providerMessageId?: string | null;
   errorCode?: string;
+  cost?: string;
 }
 
 class InMemoryStore implements DispatchStore {
@@ -71,17 +72,26 @@ class InMemoryStore implements DispatchStore {
   async fetchSuppressedHashes(_ws: string, _kind: 'email' | 'phone', hashes: string[]) {
     return new Set(hashes.filter((h) => this.suppressedHashes.has(h)));
   }
+  async fetchChannelPrice(): Promise<string> {
+    return '0.010000';
+  }
   async claimRecipients(
     _campaign: DispatchCampaign,
     _channel: 'email' | 'sms' | 'voice',
     _fromIdentity: string,
     contacts: DispatchContact[],
+    costPerMessage: string,
   ): Promise<ClaimedRecipient[]> {
     const claimed: ClaimedRecipient[] = [];
     for (const contact of contacts) {
       if (this.messages.has(contact.contactId)) continue; // ON CONFLICT DO NOTHING
       const messageId = `m-${++this.seq}`;
-      this.messages.set(contact.contactId, { messageId, contactId: contact.contactId, status: 'queued' });
+      this.messages.set(contact.contactId, {
+        messageId,
+        contactId: contact.contactId,
+        status: 'queued',
+        cost: costPerMessage,
+      });
       claimed.push({ messageId, contact });
     }
     return claimed;
@@ -155,6 +165,8 @@ describe('processCampaignDispatch', () => {
 
     expect(adapter.sendAttempts).toHaveLength(3);
     expect([...store.messages.values()].every((m) => m.status === 'sent')).toBe(true);
+    // Per-message cost stamped on every claim row for billing capture
+    expect([...store.messages.values()].every((m) => m.cost === '0.010000')).toBe(true);
     expect(store.completedCount).toBe(3);
   });
 

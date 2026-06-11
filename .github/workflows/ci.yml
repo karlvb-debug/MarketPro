@@ -14,6 +14,22 @@ jobs:
     name: Lint, type-check, test, build
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: marketpro
+          POSTGRES_PASSWORD: marketpro
+          POSTGRES_DB: marketpro_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U marketpro"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://marketpro:marketpro@localhost:5432/marketpro_test
     steps:
       - uses: actions/checkout@v4
 

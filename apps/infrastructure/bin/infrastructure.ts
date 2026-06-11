@@ -100,6 +100,7 @@ const billingStack = new BillingStack(app, 'MarketingSaaSBillingStack', {
   database: databaseStack.database,
   dbSecret: databaseStack.dbSecret,
   idempotencyTable: databaseStack.idempotencyTable,
+  opsAlertsTopic: databaseStack.opsAlertsTopic,
 });
 
 billingStack.addDependency(databaseStack);

@@ -1,7 +1,7 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import Stripe from 'stripe';
 import { accountBalances, transactionsLedger } from '../drizzle/schema';
-import { eq, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { getDb } from './lib/db';
 
 let stripeClient: Stripe.Stripe | null = null;
@@ -86,14 +86,18 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
               status: 'COMPLETED'
           });
 
-          // Increment available_credits safely using raw SQL math within Drizzle to avoid race conditions
-          // This replicates what the authorize_campaign_funds pl/pgsql function does!
-          await tx.update(accountBalances)
-            .set({
-               availableCredits: sql`${accountBalances.availableCredits} + ${depositAmount}`,
-               lastUpdatedAt: sql`CURRENT_TIMESTAMP`
-            })
-            .where(eq(accountBalances.workspaceId, workspaceId));
+          // Increment available_credits with SQL-side numeric math (race-safe).
+          // UPSERT: a first-ever deposit must create the balance row rather
+          // than silently updating zero rows.
+          await tx.insert(accountBalances)
+            .values({ workspaceId, availableCredits: depositAmount })
+            .onConflictDoUpdate({
+              target: accountBalances.workspaceId,
+              set: {
+                availableCredits: sql`${accountBalances.availableCredits} + ${depositAmount}`,
+                lastUpdatedAt: sql`CURRENT_TIMESTAMP`,
+              },
+            });
       });
 
       console.log(`Successfully completed deposit transaction for ${paymentIntent.id}`);
