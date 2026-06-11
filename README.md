@@ -1,159 +1,72 @@
-# Turborepo starter
+# MarketPro
 
-This Turborepo starter is maintained by the Turborepo core team.
+Multi-channel bulk marketing platform (Email, SMS, Voice) built on native AWS services. A Next.js portal drives a serverless backend: API Gateway + Lambda over RDS PostgreSQL, with per-channel SQS dispatch queues feeding Amazon SES (email), AWS End User Messaging (SMS), and Amazon Connect (voice).
 
-## Using this example
+- **Architecture & design:** [architecture_plan.md](./architecture_plan.md)
+- **Work tracking:** [TODO.md](./TODO.md)
+- **Current-state assessment & roadmap:** [FOUNDATION_REVIEW.md](./FOUNDATION_REVIEW.md)
 
-Run the following command:
+## Repository layout
 
-```sh
-npx create-turbo@latest
+```
+apps/
+  frontend/         Next.js 16 (App Router) user portal — contacts, segments,
+                    campaigns, email builder, templates, inbox, settings
+  infrastructure/   AWS CDK (TypeScript) — 9 stacks, Lambda handlers,
+                    Drizzle ORM schema (23-table PostgreSQL)
+packages/
+  ui/               Shared React components
+  eslint-config/    Shared ESLint flat configs
+  typescript-config/ Shared tsconfig bases
 ```
 
-## What's inside?
+Key infrastructure paths:
 
-This Turborepo includes the following packages/apps:
+- `apps/infrastructure/lib/*.ts` — CDK stacks (database, auth, api, email, sms, voice, billing, contact-ingestion, analytics)
+- `apps/infrastructure/lambda/api/*` — REST CRUD handlers behind the Lambda authorizer
+- `apps/infrastructure/lambda/dispatch/*` — SQS-driven campaign dispatch per channel
+- `apps/infrastructure/drizzle/schema.ts` — single system of record schema
 
-### Apps and Packages
+## Prerequisites
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
+- Node.js >= 22, npm >= 10
+- For deploys: AWS credentials + CDK bootstrap in the target account, and two
+  Secrets Manager secrets: `marketing-saas/stripe-secret` and
+  `marketing-saas/stripe-webhook-secret` (plaintext secret values).
+  RDS credentials are generated automatically at `marketing-saas/rds-credentials`.
 
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
+## Common commands
 
-### Utilities
-
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
-### Build
-
-To build all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
+Run from the repo root:
 
 ```sh
-cd my-turborepo
-turbo build
+npm install            # install all workspaces
+npm run dev            # start the frontend dev server (turbo)
+npm run lint           # ESLint, zero-warning policy
+npm run check-types    # TypeScript across all workspaces
+npm test               # infrastructure CDK assertion tests (jest)
+npm run build          # build all workspaces
 ```
 
-Without global `turbo`, use your package manager:
+## Deploying
 
 ```sh
-cd my-turborepo
-npx turbo build
-yarn dlx turbo build
-pnpm exec turbo build
+cd apps/infrastructure
+npx cdk deploy --all --outputs-file cdk-outputs.json
 ```
 
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+`cdk-outputs.json` contains live account/resource identifiers and is
+intentionally gitignored — never commit it. Database migrations currently run
+via the `db-migrate` Lambda (invoke manually after deploy); see
+FOUNDATION_REVIEW.md M5 for the planned move to versioned migrations.
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+Optional deploy-time env vars:
 
-```sh
-turbo build --filter=docs
-```
+- `SES_DOMAIN` — enables SES domain identity + managed dedicated IP pool
+- `CORS_ORIGIN` — restricts API Gateway CORS (defaults are dev-friendly)
 
-Without global `turbo`:
+## CI
 
-```sh
-npx turbo build --filter=docs
-yarn exec turbo build --filter=docs
-pnpm exec turbo build --filter=docs
-```
-
-### Develop
-
-To develop all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo dev
-```
-
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo dev
-yarn exec turbo dev
-pnpm exec turbo dev
-```
-
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo dev --filter=web
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo dev --filter=web
-yarn exec turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-```
-
-### Remote Caching
-
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
-
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
-
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo login
-```
-
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo login
-yarn exec turbo login
-pnpm exec turbo login
-```
-
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
-
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo link
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo link
-yarn exec turbo link
-pnpm exec turbo link
-```
-
-## Useful Links
-
-Learn more about the power of Turborepo:
-
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)
+GitHub Actions (`.github/workflows/ci.yml`) runs lint → type-check → test →
+build on every PR and push to `main`. All four must pass; the lint step
+enforces `--max-warnings 0`.
