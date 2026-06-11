@@ -170,6 +170,14 @@ export class ApiStack extends cdk.Stack {
     });
     props.dbSecret.grantRead(templatesLambda);
 
+    // GDPR/CCPA right-to-be-forgotten — destructive, admin+ only
+    const forgetLambda = new lambdaNodejs.NodejsFunction(this, 'RightToBeForgottenFunction', {
+      ...commonLambdaProps,
+      entry: path.join(__dirname, '../lambda/right-to-be-forgotten.ts'),
+      handler: 'handler',
+    });
+    props.dbSecret.grantRead(forgetLambda);
+
     const batchLambda = new lambdaNodejs.NodejsFunction(this, 'BatchFunction', {
       ...commonLambdaProps,
       entry: path.join(__dirname, '../lambda/api/batch.ts'),
@@ -260,6 +268,10 @@ export class ApiStack extends cdk.Stack {
     contactIdResource.addMethod('GET', contactsIntegration, securedMethodOptions);
     contactIdResource.addMethod('PUT', contactsIntegration, securedMethodOptions);
     contactIdResource.addMethod('DELETE', contactsIntegration, securedMethodOptions);
+
+    // /contacts/{id}/forget — GDPR/CCPA erasure (Data Retention Matrix)
+    const contactForgetResource = contactIdResource.addResource('forget');
+    contactForgetResource.addMethod('POST', new apigateway.LambdaIntegration(forgetLambda), securedMethodOptions);
 
     // ---- /segments ----
     const segmentsResource = this.api.root.addResource('segments');

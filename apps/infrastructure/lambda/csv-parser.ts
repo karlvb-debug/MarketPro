@@ -3,6 +3,7 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import csv from 'csv-parser';
 import { eq, sql } from 'drizzle-orm';
 import { getDb } from './lib/db';
+import { normalizeContactRow } from './lib/contact-validate';
 import { contacts, contactSegment } from '../drizzle/schema';
 import { Readable } from 'stream';
 
@@ -53,21 +54,20 @@ export const handler = async (event: any) => {
   const processBatch = async (rows: any[]) => {
     if (rows.length === 0) return;
 
-    // Filter invalid rows
-    const validRows = rows.map(r => ({
-      workspaceId,
-      email: r.email || null,
-      phone: r.phone || null,
-      firstName: r.firstName || null,
-      lastName: r.lastName || null,
-      company: r.company || null,
-      timezone: r.timezone || null,
-      state: r.state || null,
-      status: 'active' as const,
-      source: 'csv_import' as const,
-      consentSource: 'unknown' as const,
-      customFields: {},
-    })).filter(r => r.email || r.phone || r.firstName || r.lastName);
+    // Normalize + validate: emails lowercased and syntax-checked, phones
+    // canonicalized to E.164, names control-char-stripped and length-capped.
+    // Rows with neither a valid email nor a valid phone are unreachable
+    // and rejected.
+    const validRows = rows
+      .map((r) => normalizeContactRow(r))
+      .filter((n): n is NonNullable<typeof n> => n !== null)
+      .map((n) => ({
+        workspaceId,
+        ...n,
+        status: 'active' as const,
+        source: 'csv_import' as const,
+        consentSource: 'unknown' as const,
+      }));
 
     if (validRows.length === 0) return;
 

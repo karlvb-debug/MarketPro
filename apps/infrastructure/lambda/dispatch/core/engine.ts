@@ -75,6 +75,7 @@ export async function processCampaignDispatch<TTemplate, TSetup>(
   let failed = 0;
   let skippedSuppressed = 0;
   let skippedAlreadyClaimed = 0;
+  let skippedCompliance = 0;
   let cursor: string | null = null;
 
   for (;;) {
@@ -82,7 +83,20 @@ export async function processCampaignDispatch<TTemplate, TSetup>(
     if (page.length === 0) break;
     cursor = page[page.length - 1]!.contactId;
 
-    const reachable = page.filter((c) => adapter.recipientOf(c));
+    let reachable = page.filter((c) => adapter.recipientOf(c));
+
+    // Compliance gate (e.g. TCPA quiet hours). Skipped contacts are not
+    // claimed: re-queueing the campaign during allowed hours reaches them.
+    if (adapter.skipReasonOf) {
+      const now = new Date();
+      const allowed: typeof reachable = [];
+      for (const contact of reachable) {
+        const reason = adapter.skipReasonOf(contact, now);
+        if (reason) skippedCompliance++;
+        else allowed.push(contact);
+      }
+      reachable = allowed;
+    }
 
     let targets = reachable;
     if (reachable.length > 0) {
@@ -125,6 +139,7 @@ export async function processCampaignDispatch<TTemplate, TSetup>(
     failed,
     skippedSuppressed,
     skippedAlreadyClaimed,
+    skippedCompliance,
     totalRecipients,
   });
 }

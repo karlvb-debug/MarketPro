@@ -87,6 +87,26 @@ describe('EmailStack', () => {
     });
   });
 
+  test('exposes the public RFC 8058 unsubscribe endpoint', () => {
+    template.hasResourceProperties('AWS::ApiGateway::Resource', {
+      PathPart: 'unsubscribe',
+    });
+    // Both GET (footer link) and POST (one-click) — and NO authorizer
+    const methods = template.findResources('AWS::ApiGateway::Method');
+    const unsubMethods = Object.values(methods).filter((m) =>
+      ['GET', 'POST'].includes(m.Properties?.HttpMethod) && m.Properties?.AuthorizationType === 'NONE',
+    );
+    expect(unsubMethods.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('dispatch Lambda knows the unsubscribe URL for List-Unsubscribe headers', () => {
+    const lambdas = template.findResources('AWS::Lambda::Function');
+    const dispatch = Object.values(lambdas).find((fn) =>
+      JSON.stringify(fn.Properties?.Environment ?? {}).includes('UNSUBSCRIBE_BASE_URL'),
+    );
+    expect(dispatch).toBeDefined();
+  });
+
   test('alarms on DLQ depth and Lambda errors, wired to the ops topic', () => {
     template.resourceCountIs('AWS::CloudWatch::Alarm', 2);
     template.hasResourceProperties('AWS::CloudWatch::Alarm', {

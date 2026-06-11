@@ -8,6 +8,7 @@ export interface DispatchContact {
   firstName: string | null;
   lastName: string | null;
   company: string | null;
+  timezone: string | null;
 }
 
 export interface DispatchCampaign {
@@ -61,6 +62,14 @@ export interface ChannelAdapter<TTemplate, TSetup> {
 
   /** sha256 hash used against the suppression list for this channel. */
   suppressionHashOf(contact: DispatchContact): string;
+
+  /**
+   * Optional compliance gate evaluated before a recipient is claimed.
+   * Return a reason string (e.g. 'quiet_hours') to skip the contact in
+   * this run — skipped contacts are NOT claimed, so re-queueing the
+   * campaign later picks them up.
+   */
+  skipReasonOf?(contact: DispatchContact, now: Date): string | null;
 
   /** Which suppression hash column applies: 'email' or 'phone'. */
   suppressionHashKind: 'email' | 'phone';

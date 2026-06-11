@@ -112,14 +112,17 @@ Phase-by-phase reality vs. the claims in `TODO.md` / `architecture_plan.md`:
 
 **Deferred within M2 scope:** future-scheduled campaigns are authorized when they fire (scheduled sends themselves are M5); auto-recharge below threshold is M6 (billing dashboard work).
 
-### Milestone 3 — Compliance is real (≈2 weeks)
+### Milestone 3 — Compliance is real (≈2 weeks) — ✅ DONE (June 11, 2026)
 *Goal: the legal claims in the architecture doc are true.*
 
-- [ ] Implement right-to-be-forgotten per the Data Retention Matrix: hard-delete profile, SHA-256 hash into suppression, strip billing PII, tokenized analytics. Tests proving each.
-- [ ] One-Click Unsubscribe (RFC 8058) headers on every email + unsubscribe endpoint → suppression list.
-- [ ] Inbound SMS handler: SNS topic → Lambda → STOP/HELP keyword processing → consent revocation chain (required before any production SMS).
-- [ ] Quiet-hours enforcement in SMS dispatch using the timezone resolver (NPA fallback first; HLR lookups later).
-- [ ] CSV import validation: email/phone normalization, field whitelist, custom-field sanitization.
+- [x] Right-to-be-forgotten (`lib/gdpr.ts` + `POST /contacts/{id}/forget`, admin+): transactional deletion matrix — profile hard-deleted, segment memberships cascaded, SHA-256 hashes retained on suppression (`gdpr_delete`), campaign history anonymized via FK SET NULL, inbox PII redacted, form submissions hard-deleted. Tenant-isolated and idempotent, proven by integration tests.
+- [x] One-Click Unsubscribe (RFC 8058): email dispatch moved to SESv2 (v1 SendEmail cannot set headers) adding `List-Unsubscribe`/`List-Unsubscribe-Post`; public `/unsubscribe` endpoint hosted in the email stack (token = the recipient's `campaign_messages` UUID) feeding suppression + contact status + consent ledger.
+- [x] Inbound SMS handler subscribed to `InboundSmsTopic`: logs to `sms_inbox`, STOP-family keywords → suppression + `opt_out` consent evidence, START → suppression removal + `opt_in`, HELP flagged.
+- [x] Quiet hours (TCPA 8am–9pm local): engine compliance gate skips recipients *without claiming them* (re-queue later reaches them); explicit contact timezone enforced, unknown timezones use the conservative all-continental-US window (fail closed). HLR/CNAM lookups remain future work (M6).
+- [x] Import validation shared by CSV pipeline and bulk API (`lib/contact-validate.ts`): email syntax + lowercasing, E.164 phone canonicalization, control-character stripping, custom fields capped to sanitized scalars, unreachable rows rejected.
+- [x] 22 new tests: 8 Postgres integration (deletion matrix, unsubscribe idempotency, STOP/START round-trip) + quiet-hours/keyword/validation units + CDK assertions (public unsubscribe endpoint has NO authorizer; dispatch Lambda receives the URL).
+
+**Deferred within M3 scope:** consent-evidence archival to S3 Glacier (4-year retention) and FTC DNC scrubbing (needs customer SAN) — both tracked for M6.
 
 ### Milestone 4 — Frontend hardening (≈2 weeks, parallelizable with M2–M3)
 

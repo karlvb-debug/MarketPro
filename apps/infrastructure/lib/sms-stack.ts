@@ -1,6 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as sns from 'aws-cdk-lib/aws-sns';
+import * as snsSubscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as lambdaNodejs from 'aws-cdk-lib/aws-lambda-nodejs';
@@ -41,6 +42,29 @@ export class SmsStack extends cdk.Stack {
     const inboundSmsTopic = new sns.Topic(this, 'InboundSmsTopic', {
         topicName: 'marketing-saas-inbound-sms',
     });
+
+    // 2.5. Inbound SMS handler — logs to sms_inbox and processes STOP/HELP/
+    // START keywords into the consent revocation chain (TCPA).
+    const inboundSmsLambda = new lambdaNodejs.NodejsFunction(this, 'InboundSmsFunction', {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      entry: path.join(__dirname, '../lambda/inbound-sms.ts'),
+      handler: 'handler',
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(30),
+      vpc: props.vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      securityGroups: [props.lambdaSecurityGroup],
+      environment: {
+        DATABASE_SECRET_ARN: props.dbSecret.secretArn,
+        DATABASE_HOST: props.database.instanceEndpoint.hostname,
+        DATABASE_NAME: 'marketingsaas',
+      },
+      bundling: {
+        externalModules: ['@aws-sdk/*'],
+      },
+    });
+    props.dbSecret.grantRead(inboundSmsLambda);
+    inboundSmsTopic.addSubscription(new snsSubscriptions.LambdaSubscription(inboundSmsLambda));
 
     // 3. Create SQS Queue for SMS dispatch (with DLQ for production reliability)
     const smsDispatchDlq = new sqs.Queue(this, 'SmsDispatchDLQ', {

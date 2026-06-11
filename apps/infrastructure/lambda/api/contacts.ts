@@ -10,6 +10,7 @@ import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { eq, ne, and, or, ilike, sql, inArray } from 'drizzle-orm';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { normalizeContactRow } from '../lib/contact-validate';
 import { getDb, respond, getWorkspaceId, getUserId, requireRole, isSuperAdmin, methodToAction } from '../lib/db';
 import { contacts, adminAuditLog, segments, contactSegment, suppressionList } from '../../drizzle/schema';
 import * as crypto from 'crypto';
@@ -238,24 +239,28 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       const segmentId = body.segmentId?.trim();
       if (rawRows.length === 0) return respond(400, { message: 'No contacts provided' });
 
-      const toValues = (c: any) => ({
-        workspaceId,
-        email: c.email || null,
-        phone: c.phone || null,
-        firstName: c.first_name || c.firstName || null,
-        lastName: c.last_name || c.lastName || null,
-        company: c.company || null,
-        timezone: c.timezone || null,
-        state: c.state || null,
-        status: 'active' as const,
-        source: c.source || 'csv_import',
-        consentSource: c.consent_source || c.consentSource || null,
-        customFields: c.custom_fields || c.customFields || {},
-      });
+      // Normalize + validate every row (shared with the CSV pipeline):
+      // emails lowercased/syntax-checked, phones canonicalized to E.164,
+      // names control-char-stripped, custom fields sanitized to capped
+      // scalars. Rows with neither valid email nor valid phone are rejected.
+      const toValues = (c: any) => {
+        const n = normalizeContactRow(c);
+        if (!n) return null;
+        return {
+          workspaceId,
+          ...n,
+          status: 'active' as const,
+          source: c.source || 'csv_import',
+          consentSource: c.consent_source || c.consentSource || null,
+        };
+      };
+      const normalized = rawRows
+        .map((c) => toValues(c))
+        .filter((c): c is NonNullable<ReturnType<typeof toValues>> => c !== null);
 
       // Split into: contacts with email vs phone-only vs invalid
-      const withEmail = rawRows.filter((c: any) => c.email?.trim());
-      const phoneOnly = rawRows.filter((c: any) => !c.email?.trim() && c.phone?.trim());
+      const withEmail = normalized.filter((c) => c.email);
+      const phoneOnly = normalized.filter((c) => !c.email && c.phone);
       const rejected = rawRows.length - withEmail.length - phoneOnly.length;
 
       // All three passes commit or roll back together: a failure in the
@@ -269,7 +274,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       if (withEmail.length > 0) {
         const result = await tx
           .insert(contacts)
-          .values(withEmail.map(toValues))
+          .values(withEmail)
           .onConflictDoUpdate({
             target: [contacts.workspaceId, contacts.email],
             set: {
@@ -292,7 +297,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       if (phoneOnly.length > 0) {
         const result = await tx
           .insert(contacts)
-          .values(phoneOnly.map(toValues))
+          .values(phoneOnly)
           .onConflictDoUpdate({
             target: [contacts.workspaceId, contacts.phone],
             set: {

@@ -76,6 +76,7 @@ export async function createDispatchStore(): Promise<DispatchStore> {
           firstName: contacts.firstName,
           lastName: contacts.lastName,
           company: contacts.company,
+          timezone: contacts.timezone,
         })
         .from(contactSegment)
         .innerJoin(contacts, eq(contactSegment.contactId, contacts.contactId))

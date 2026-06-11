@@ -6,6 +6,7 @@ import { makeSqsHandler } from './core/engine';
 import { createDispatchStore } from './core/store';
 import { isRetryableError, errorCodeOf, RetryableDispatchError } from './core/errors';
 import { mergeTags, phoneSuppressionHash } from './core/personalize';
+import { isWithinSendWindow } from './core/quiet-hours';
 import { ChannelAdapter, SendResult } from './core/types';
 
 const smsClient = new PinpointSMSVoiceV2Client({});
@@ -48,6 +49,11 @@ const smsAdapter: ChannelAdapter<SmsTemplate, SmsSetup> = {
   },
 
   suppressionHashOf: phoneSuppressionHash,
+
+  // TCPA: texts only 8am-9pm recipient local time
+  skipReasonOf(contact, now) {
+    return isWithinSendWindow(contact, now) ? null : 'quiet_hours';
+  },
 
   async sendBatch(claimed, setup): Promise<SendResult[]> {
     const results: SendResult[] = [];

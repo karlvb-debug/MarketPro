@@ -21,6 +21,7 @@ function makeContact(n: number): DispatchContact {
     firstName: `First${n}`,
     lastName: `Last${n}`,
     company: null,
+    timezone: null,
   };
 }
 
@@ -230,6 +231,21 @@ describe('processCampaignDispatch', () => {
     expect(rows.find((r) => r.contactId === makeContact(1).contactId)!.status).toBe('failed');
     expect(rows.find((r) => r.contactId === makeContact(2).contactId)!.status).toBe('sent');
     expect(store.completedCount).toBe(2);
+  });
+
+  test('compliance gate (skipReasonOf) skips without claiming', async () => {
+    const store = new InMemoryStore();
+    store.contacts = [makeContact(1), makeContact(2)];
+    const adapter = makeAdapter();
+    // Block contact 1 (e.g. quiet hours in their timezone)
+    adapter.skipReasonOf = (contact) =>
+      contact.contactId === makeContact(1).contactId ? 'quiet_hours' : null;
+
+    await processCampaignDispatch(payload, store, adapter, logger);
+
+    expect(adapter.sendAttempts).toEqual([makeContact(2).contactId]);
+    // NOT claimed — a re-queue during allowed hours still reaches them
+    expect(store.messages.has(makeContact(1).contactId)).toBe(false);
   });
 
   test('cancels the campaign when the template is missing', async () => {

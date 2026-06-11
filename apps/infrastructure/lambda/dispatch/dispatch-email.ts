@@ -1,4 +1,4 @@
-import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../lib/db';
 import { emailTemplates } from '../../drizzle/schema';
@@ -8,7 +8,12 @@ import { isRetryableError, errorCodeOf, RetryableDispatchError } from './core/er
 import { emailSuppressionHash, mergeTags } from './core/personalize';
 import { ChannelAdapter, SendResult } from './core/types';
 
-const ses = new SESClient({});
+// SESv2: the Simple content type supports custom headers, which the v1
+// SendEmail API does not — required for RFC 8058 one-click unsubscribe.
+const ses = new SESv2Client({});
+
+// Public unsubscribe endpoint (UnsubscribeApi in email-stack); token appended per recipient
+const UNSUBSCRIBE_BASE_URL = process.env.UNSUBSCRIBE_BASE_URL;
 
 interface EmailTemplate {
   subjectLine: string | null;
@@ -16,7 +21,8 @@ interface EmailTemplate {
 }
 
 interface EmailSetup {
-  sourceStr: string;
+  fromAddress: string;
+  fromName: string;
   replyTo: string;
   subject: string;
   html: string;
@@ -42,11 +48,11 @@ const emailAdapter: ChannelAdapter<EmailTemplate, EmailSetup> = {
     const fromAddress = settings?.emailFromAddress || 'noreply@yourdomain.com';
     const fromName = settings?.emailFromName || 'Marketing SaaS';
     const replyTo = settings?.emailReplyTo || fromAddress;
-    const sourceStr = fromName ? `${fromName} <${fromAddress}>` : fromAddress;
     return {
-      fromIdentity: sourceStr,
+      fromIdentity: fromName ? `${fromName} <${fromAddress}>` : fromAddress,
       setup: {
-        sourceStr,
+        fromAddress,
+        fromName,
         replyTo,
         subject: template.subjectLine || 'No Subject',
         html: template.htmlContent || '',
@@ -62,16 +68,30 @@ const emailAdapter: ChannelAdapter<EmailTemplate, EmailSetup> = {
 
   async sendBatch(claimed, setup): Promise<SendResult[]> {
     const results: SendResult[] = [];
-    for (const { contact } of claimed) {
+    for (const { messageId, contact } of claimed) {
       try {
+        // RFC 8058 One-Click Unsubscribe — token is this recipient's
+        // campaign_messages UUID, resolved by the public /unsubscribe route.
+        const headers = UNSUBSCRIBE_BASE_URL
+          ? [
+              { Name: 'List-Unsubscribe', Value: `<${UNSUBSCRIBE_BASE_URL}?token=${messageId}>` },
+              { Name: 'List-Unsubscribe-Post', Value: 'List-Unsubscribe=One-Click' },
+            ]
+          : undefined;
+
         const response = await ses.send(
           new SendEmailCommand({
-            Source: setup.sourceStr,
+            FromEmailAddress: setup.fromName
+              ? `${setup.fromName} <${setup.fromAddress}>`
+              : setup.fromAddress,
             ReplyToAddresses: [setup.replyTo],
             Destination: { ToAddresses: [contact.email!] },
-            Message: {
-              Subject: { Data: setup.subject },
-              Body: { Html: { Data: mergeTags(setup.html, contact) } },
+            Content: {
+              Simple: {
+                Subject: { Data: setup.subject },
+                Body: { Html: { Data: mergeTags(setup.html, contact) } },
+                Headers: headers,
+              },
             },
           }),
         );

@@ -47,6 +47,7 @@ describe('personalize', () => {
     firstName: 'Ada',
     lastName: 'Lovelace',
     company: 'Analytical',
+    timezone: null,
   };
 
   test('mergeTags supports both tag spellings', () => {

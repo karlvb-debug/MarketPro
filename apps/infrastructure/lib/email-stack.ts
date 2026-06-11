@@ -1,5 +1,6 @@
 import * as cdk from "aws-cdk-lib";
 import { Construct } from "constructs";
+import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as ses from "aws-cdk-lib/aws-ses";
 import * as sqs from "aws-cdk-lib/aws-sqs";
 import * as lambda from "aws-cdk-lib/aws-lambda";
@@ -59,6 +60,40 @@ export class EmailStack extends cdk.Stack {
       },
     });
 
+    // 1.5. Public unsubscribe endpoint (RFC 8058 one-click + footer links).
+    // Lives here rather than the main API stack because the dispatch Lambda
+    // needs its URL at deploy time (ApiStack depends on EmailStack).
+    const unsubscribeLambda = new lambdaNodejs.NodejsFunction(this, "UnsubscribeFunction", {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      entry: path.join(__dirname, "../lambda/unsubscribe.ts"),
+      handler: "handler",
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(10),
+      vpc: props.vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      securityGroups: [props.lambdaSecurityGroup],
+      environment: {
+        DATABASE_SECRET_ARN: props.dbSecret.secretArn,
+        DATABASE_HOST: props.database.instanceEndpoint.hostname,
+        DATABASE_NAME: "marketingsaas",
+      },
+      bundling: {
+        externalModules: ["@aws-sdk/*"],
+      },
+    });
+    props.dbSecret.grantRead(unsubscribeLambda);
+
+    const unsubscribeApi = new apigateway.RestApi(this, "UnsubscribeApi", {
+      restApiName: "Marketing SaaS Unsubscribe API",
+      description: "Public RFC 8058 one-click unsubscribe endpoint",
+    });
+    const unsubscribeResource = unsubscribeApi.root.addResource("unsubscribe");
+    const unsubscribeIntegration = new apigateway.LambdaIntegration(unsubscribeLambda);
+    unsubscribeResource.addMethod("GET", unsubscribeIntegration); // footer link
+    unsubscribeResource.addMethod("POST", unsubscribeIntegration); // one-click (mail clients)
+
+    const unsubscribeUrl = `${unsubscribeApi.url}unsubscribe`;
+
     // 2. Create Dispatch Lambda
     const dispatchLambda = new lambdaNodejs.NodejsFunction(
       this,
@@ -76,6 +111,7 @@ export class EmailStack extends cdk.Stack {
           DATABASE_SECRET_ARN: props.dbSecret.secretArn,
           DATABASE_HOST: props.database.instanceEndpoint.hostname,
           DATABASE_NAME: "marketingsaas",
+          UNSUBSCRIBE_BASE_URL: unsubscribeUrl,
         },
         bundling: {
           externalModules: ["@aws-sdk/*"],
@@ -117,6 +153,9 @@ export class EmailStack extends cdk.Stack {
     });
 
     // Outputs
+    new cdk.CfnOutput(this, "UnsubscribeEndpointUrl", {
+      value: unsubscribeUrl,
+    });
     new cdk.CfnOutput(this, "EmailDispatchQueueUrl", {
       value: this.emailDispatchQueue.queueUrl,
     });

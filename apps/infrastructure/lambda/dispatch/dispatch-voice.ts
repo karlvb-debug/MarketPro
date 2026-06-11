@@ -9,6 +9,7 @@ import { makeSqsHandler } from './core/engine';
 import { createDispatchStore } from './core/store';
 import { isRetryableError, errorCodeOf, RetryableDispatchError } from './core/errors';
 import { phoneSuppressionHash, toE164 } from './core/personalize';
+import { isWithinSendWindow } from './core/quiet-hours';
 import { ChannelAdapter, ClaimedRecipient, SendResult } from './core/types';
 
 const campaignsClient = new ConnectCampaignsClient({});
@@ -73,6 +74,11 @@ const voiceAdapter: ChannelAdapter<VoiceTemplate, VoiceSetup> = {
   },
 
   suppressionHashOf: phoneSuppressionHash,
+
+  // TCPA: calls only 8am-9pm recipient local time
+  skipReasonOf(contact, now) {
+    return isWithinSendWindow(contact, now) ? null : 'quiet_hours';
+  },
 
   async sendBatch(claimed, setup, logger): Promise<SendResult[]> {
     const results: SendResult[] = [];
