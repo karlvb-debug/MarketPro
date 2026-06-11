@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { EmailDesign, SavedTemplate } from '../lib/email-templates';
 import {
@@ -22,7 +22,7 @@ function loadDesign(): EmailDesign | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return JSON.parse(raw);
-  } catch {}
+  } catch { /* corrupt saved design — start fresh */ }
   return null;
 }
 
@@ -49,16 +49,10 @@ export default function EmailBuilderPage() {
   const [renameValue, setRenameValue] = useState('');
 
   const searchParams = useSearchParams();
-  const templateId = searchParams.get('templateId');
   const formId = searchParams.get('formId');
   const mode = searchParams.get('mode') === 'form' ? 'form' : 'email' as const;
   const store = useStore();
   const confirm = useConfirm();
-
-  // If we have a templateId, look up the template name
-  const linkedTemplate = templateId
-    ? store.templates.email.find((t) => t.templateId === templateId)
-    : null;
 
   // If form mode, look up the web form
   const linkedForm = (mode === 'form' && formId)
@@ -70,8 +64,13 @@ export default function EmailBuilderPage() {
     setSavedTemplates(loadSavedTemplates());
   }, []);
 
-  // Resume saved session or load from templateId or formId
+  // Resume saved session or load from templateId or formId.
+  // Runs once on mount — the ref guard keeps it from re-running while letting
+  // the dependency array stay exhaustive.
+  const initializedRef = useRef(false);
   useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
     // In form mode, load from the form's design
     if (mode === 'form' && linkedForm?.design) {
       setDesign(linkedForm.design);
@@ -104,7 +103,7 @@ export default function EmailBuilderPage() {
       setDesign(saved);
       setView('editor');
     }
-  }, []);
+  }, [mode, linkedForm]);
 
   const refreshSavedTemplates = () => setSavedTemplates(loadSavedTemplates());
 
@@ -131,22 +130,12 @@ export default function EmailBuilderPage() {
       // We'll persist the design on the WebForm object
       const wf = store.templates.webform.find((f) => f.formId === formId);
       if (wf) {
-        (wf as any).design = updated;
+        wf.design = updated;
       }
     } else {
       saveDesign(updated);
     }
   }, [mode, formId, store]);
-
-  const handleNewTemplate = async () => {
-    const ok = await confirm('Start fresh? Your current work will be lost.', { title: 'New Template', confirmLabel: 'Start Fresh' });
-    if (ok) {
-      localStorage.removeItem(STORAGE_KEY);
-      setDesign(null);
-      setView('gallery');
-      refreshSavedTemplates();
-    }
-  };
 
   const handleSaveTemplate = () => {
     if (!design || !saveName.trim()) return;

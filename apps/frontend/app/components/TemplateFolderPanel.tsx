@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { useStore, TemplateFolder, EmailTemplate, SmsTemplate, VoiceScript, WebForm } from '../lib/store';
+import { useState } from 'react';
+import { useStore, TemplateFolder, type AnyTemplate } from '../lib/store';
 import { showToast } from './ui';
 import { useConfirm } from './ConfirmDialog';
 
@@ -11,28 +11,19 @@ interface TemplateFolderPanelProps {
   onSelectFolder: (folderId: string | null) => void;
 }
 
-// Get the template ID from any template type
-function getTemplateId(t: any): string {
-  return t.templateId || t.scriptId || t.formId;
-}
-
 export default function TemplateFolderPanel({ activeFolderId, activeType, onSelectFolder }: TemplateFolderPanelProps) {
   const store = useStore();
   const confirm = useConfirm();
   const { templates, templateFolders } = store;
 
   const [search, setSearch] = useState('');
-  const [creatingIn, setCreatingIn] = useState<string | false>(false);
-  const [newName, setNewName] = useState('');
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
 
-  const inputRef = useRef<HTMLInputElement>(null);
-
   // Get all templates for the active type
-  const allTemplates = templates[activeType] as any[];
+  const allTemplates: AnyTemplate[] = templates[activeType];
   const totalCount = allTemplates.length;
 
   // Group by folder
@@ -40,7 +31,7 @@ export default function TemplateFolderPanel({ activeFolderId, activeType, onSele
 
   // Count templates per folder for the active type
   const countInFolder = (folderName: string) =>
-    allTemplates.filter((t: any) => (t.folder || '') === folderName).length;
+    allTemplates.filter((t) => (t.folder || '') === folderName).length;
 
   const handleCreateFolder = () => {
     if (!newFolderName.trim()) return;
@@ -51,9 +42,6 @@ export default function TemplateFolderPanel({ activeFolderId, activeType, onSele
   };
 
   // Drag & Drop
-  const handleDragStart = (templateId: string) => setDragId(templateId);
-  const handleDragEnd = () => { setDragId(null); setDragOverFolder(null); };
-
   const handleDropOnFolder = (folderName: string) => {
     if (dragId) {
       store.moveTemplateToFolder(dragId, activeType, folderName);

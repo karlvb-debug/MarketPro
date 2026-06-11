@@ -8,13 +8,7 @@ import type {
   ContactCompliance,
   Campaign,
   InboxMessage,
-  EmailTemplate,
-  SmsTemplate,
-  VoiceScript,
-  WebForm,
   Segment,
-  SegmentFolder,
-  TemplateFolder,
   WorkspaceSettings,
   CustomField,
 } from './store';
@@ -305,7 +299,7 @@ export function mapApiSettings(row: ApiSettings, customFields: CustomField[] = [
 // Mappers: Frontend → API (for create/update)
 // ============================================
 
-export function contactToApi(c: Omit<Contact, 'contactId' | 'createdAt' | 'compliance'>): Record<string, unknown> {
+export function contactToApi(c: Partial<Omit<Contact, 'contactId' | 'createdAt' | 'compliance'>>): Record<string, unknown> {
   return {
     email: c.email || null,
     phone: c.phone || null,

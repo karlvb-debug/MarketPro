@@ -22,7 +22,7 @@ export function loadImageLibrary(): LibraryImage[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return JSON.parse(raw);
-  } catch {}
+  } catch { /* corrupt library data — fall through to empty */ }
   return [];
 }
 

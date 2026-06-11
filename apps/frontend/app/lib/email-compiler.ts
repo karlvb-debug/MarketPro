@@ -6,6 +6,7 @@
 import type {
   EmailDesign,
   EmailBlock,
+  BlockStyleProps,
   HeadingProps,
   TextProps,
   ImageProps,
@@ -31,9 +32,10 @@ function esc(str: string): string {
 
 // --- Compile a single block to MJML ---
 function compileBlock(block: EmailBlock): string {
-  const blockBg = (block.props as any)?.blockBgColor;
-  const blockBgImg = (block.props as any)?.blockBgImage;
-  const blockPad = (block.props as any)?.blockPadding;
+  const styleProps = block.props as BlockStyleProps;
+  const blockBg = styleProps.blockBgColor;
+  const blockBgImg = styleProps.blockBgImage;
+  const blockPad = styleProps.blockPadding;
   const inner = compileBlockInner(block);
   if (!inner) return '';
 

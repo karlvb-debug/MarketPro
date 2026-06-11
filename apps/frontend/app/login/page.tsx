@@ -148,7 +148,7 @@ export default function LoginPage() {
               {submitting ? 'Signing in...' : 'Sign In'}
             </button>
             <p className="login-switch">
-              Don't have an account?{' '}
+              Don&apos;t have an account?{' '}
               <button type="button" onClick={() => { setMode('signup'); setLocalError(''); }}>
                 Create one
               </button>

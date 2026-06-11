@@ -1,8 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { mockDashboardStats } from './mock-data';
-import { config } from './config';
 import { api, ApiError } from './api-client';
 import { contactToApi, settingsToApi } from './api-mappers';
 
@@ -190,6 +188,16 @@ export interface TemplateFolder {
   isExpanded: boolean;
 }
 
+/** Any of the four template/content record types */
+export type AnyTemplate = EmailTemplate | SmsTemplate | VoiceScript | WebForm;
+
+/** Get the canonical record ID regardless of template type */
+export function templateRecordId(t: AnyTemplate): string {
+  if ('scriptId' in t) return t.scriptId;
+  if ('formId' in t) return t.formId;
+  return t.templateId;
+}
+
 // ============================================
 // Custom Fields & Workspace Settings
 // ============================================
@@ -293,14 +301,108 @@ import { useWorkspace } from './workspace';
 // API data loader — fetches all workspace data from backend
 // ============================================
 
+// Raw API row shapes — the backend may return camelCase or snake_case keys,
+// and any field may be missing, so everything is optional.
+interface RawSegmentRow {
+  segmentId?: string; segment_id?: string;
+  name?: string;
+  description?: string;
+  contactCount?: number; contact_count?: number;
+  folderId?: string; folder_id?: string;
+  sortOrder?: number; sort_order?: number;
+  color?: string;
+}
+
+interface RawCampaignRow {
+  campaignId?: string; campaign_id?: string;
+  name?: string;
+  channel?: Campaign['channel'];
+  status?: Campaign['status'];
+  segmentName?: string; segment_name?: string;
+  templateId?: string; template_id?: string;
+  templateName?: string; template_name?: string;
+  scheduledAt?: string | null; scheduled_at?: string | null;
+  totalRecipients?: number; total_recipients?: number;
+  delivered?: number;
+  opened?: number | null;
+  clicked?: number | null;
+  bounced?: number;
+  createdAt?: string; created_at?: string;
+}
+
+interface RawEmailTemplateRow {
+  templateId?: string; template_id?: string;
+  name?: string;
+  subjectLine?: string; subject_line?: string;
+  updatedAt?: string; updated_at?: string;
+  folderId?: string; folder_id?: string;
+  sortOrder?: number; sort_order?: number;
+}
+
+interface RawSmsTemplateRow {
+  templateId?: string; template_id?: string;
+  name?: string;
+  body?: string;
+  estimatedSegments?: number; estimated_segments?: number;
+  folderId?: string; folder_id?: string;
+  sortOrder?: number; sort_order?: number;
+}
+
+interface RawVoiceScriptRow {
+  scriptId?: string; script_id?: string;
+  name?: string;
+  voiceId?: string; voice_id?: string;
+  updatedAt?: string; updated_at?: string;
+  folderId?: string; folder_id?: string;
+  sortOrder?: number; sort_order?: number;
+}
+
+interface RawContactRow {
+  contactId?: string; contact_id?: string;
+  firstName?: string; first_name?: string;
+  lastName?: string; last_name?: string;
+  email?: string;
+  phone?: string;
+  company?: string;
+  timezone?: string;
+  state?: string;
+  status?: string;
+  segments?: string[];
+  source?: string;
+  consentSource?: Contact['consentSource']; consent_source?: Contact['consentSource'];
+  customFields?: Record<string, string>; custom_fields?: Record<string, string>;
+  createdAt?: string; created_at?: string;
+  updatedAt?: string; updated_at?: string;
+}
+
+interface BatchLoadResponse {
+  segments?: RawSegmentRow[];
+  campaigns?: RawCampaignRow[];
+  templates?: {
+    email?: RawEmailTemplateRow[];
+    sms?: RawSmsTemplateRow[];
+    voice?: RawVoiceScriptRow[];
+  };
+}
+
+interface ContactsListResponse {
+  data?: RawContactRow[];
+  meta?: {
+    total?: number;
+    pageSize?: number;
+    nextCursor?: string | null;
+    hasMore?: boolean;
+  };
+}
+
 async function loadFromApi(): Promise<StoreData | null> {
   try {
     // Single API call — loads all workspace data from one Lambda
-    const res = await api.batch.load() as any;
+    const res = await api.batch.load() as BatchLoadResponse | null;
     if (!res) return null;
 
     const rawSegments = res.segments || [];
-    const segments: Segment[] = rawSegments.map((row: any) => ({
+    const segments: Segment[] = rawSegments.map((row) => ({
       segmentId: row.segmentId || row.segment_id || crypto.randomUUID(),
       name: row.name || '',
       description: row.description || '',
@@ -311,7 +413,7 @@ async function loadFromApi(): Promise<StoreData | null> {
     }));
 
     const rawCampaigns = res.campaigns || [];
-    const campaigns: Campaign[] = rawCampaigns.map((row: any) => ({
+    const campaigns: Campaign[] = rawCampaigns.map((row) => ({
       campaignId: row.campaignId || row.campaign_id || crypto.randomUUID(),
       name: row.name || '',
       channel: row.channel || 'email',
@@ -330,7 +432,7 @@ async function loadFromApi(): Promise<StoreData | null> {
 
     const tpl = res.templates || {};
 
-    const emailTemplates: EmailTemplate[] = (tpl.email || []).map((row: any) => ({
+    const emailTemplates: EmailTemplate[] = (tpl.email || []).map((row) => ({
       templateId: row.templateId || row.template_id || crypto.randomUUID(),
       name: row.name || '',
       subjectLine: row.subjectLine || row.subject_line || '',
@@ -339,7 +441,7 @@ async function loadFromApi(): Promise<StoreData | null> {
       order: row.sortOrder || row.sort_order || 0,
     }));
 
-    const smsTemplates: SmsTemplate[] = (tpl.sms || []).map((row: any) => ({
+    const smsTemplates: SmsTemplate[] = (tpl.sms || []).map((row) => ({
       templateId: row.templateId || row.template_id || crypto.randomUUID(),
       name: row.name || '',
       body: row.body || '',
@@ -348,7 +450,7 @@ async function loadFromApi(): Promise<StoreData | null> {
       order: row.sortOrder || row.sort_order || 0,
     }));
 
-    const voiceScripts: VoiceScript[] = (tpl.voice || []).map((row: any) => ({
+    const voiceScripts: VoiceScript[] = (tpl.voice || []).map((row) => ({
       scriptId: row.scriptId || row.script_id || crypto.randomUUID(),
       name: row.name || '',
       voiceId: row.voiceId || row.voice_id || 'Joanna',
@@ -401,11 +503,11 @@ export function useStore() {
         search: contactsFilter.search || undefined,
         status: contactsFilter.status || undefined,
         segmentId: contactsFilter.segmentId || undefined,
-      }) as any;
+      }) as ContactsListResponse | null;
 
       if (res && res.data) {
         const rawContacts = res.data || [];
-        const newContacts: Contact[] = rawContacts.map((row: any) => {
+        const newContacts: Contact[] = rawContacts.map((row) => {
           const status = row.status || 'active';
           const comp = defaultCompliance();
           if (status === 'unsubscribed') {
@@ -453,7 +555,7 @@ export function useStore() {
     } finally {
       setContactsLoading(false);
     }
-  }, [workspaceId, contactsMeta.pageSize, contactsMeta.nextCursor, contactsFilter]);
+  }, [contactsMeta.pageSize, contactsMeta.nextCursor, contactsFilter]);
 
   // Reload data from API when workspace changes
   useEffect(() => {
@@ -472,10 +574,16 @@ export function useStore() {
     });
   }, [workspaceId, wsHydrated]);
 
+  // Keep a ref to the latest loadContacts so the effect below doesn't need it
+  // as a dependency — loadContacts changes identity whenever pagination state
+  // updates, which would otherwise re-trigger the load in a loop.
+  const loadContactsRef = useRef(loadContacts);
+  useEffect(() => { loadContactsRef.current = loadContacts; }, [loadContacts]);
+
   // Synchronize contacts load when filters or workspace changes
   useEffect(() => {
     if (!wsHydrated) return;
-    loadContacts(true);
+    loadContactsRef.current(true);
   }, [workspaceId, wsHydrated, contactsFilter]);
 
   // Fire-and-forget API call helper
@@ -514,7 +622,7 @@ export function useStore() {
 
     // Create on server — server generates the canonical UUID
     try {
-      const row = await api.contacts.create(contactToApi(contact)) as any;
+      const row = await api.contacts.create(contactToApi(contact)) as RawContactRow;
       const realContactId = row.contactId || row.contact_id;
       const newContact: Contact = {
         ...contact,
@@ -545,9 +653,10 @@ export function useStore() {
       setContactsMeta((prev) => ({ ...prev, total: prev.total + 1 }));
 
       return null;
-    } catch (err: any) {
+    } catch (err) {
       console.error('[API] Create contact failed:', err);
-      return err?.message || 'Failed to create contact. Please try again.';
+      // API failures throw ApiError-shaped objects, not Error instances
+      return (err as Partial<ApiError> | null)?.message || 'Failed to create contact. Please try again.';
     }
   }, [data.contacts, data.segments]);
 
@@ -562,8 +671,8 @@ export function useStore() {
 
     // Persist to server — use returned row as canonical state
     try {
-      const row = await api.contacts.update(contactId, contactToApi(patch as any)) as any;
-      if (row && row.contactId || row.contact_id) {
+      const row = await api.contacts.update(contactId, contactToApi(patch)) as RawContactRow | null;
+      if (row && (row.contactId || row.contact_id)) {
         setData((prev) => ({
           ...prev,
           contacts: prev.contacts.map((c) => {
@@ -1210,8 +1319,8 @@ export function useStore() {
       ...prev,
       templates: {
         ...prev.templates,
-        [type]: (prev.templates[type] as any[]).filter((t: any) => (t.templateId || t.scriptId || t.formId) !== templateId),
-      },
+        [type]: (prev.templates[type] as AnyTemplate[]).filter((t) => templateRecordId(t) !== templateId),
+      } as StoreData['templates'],
     }));
     // API: delete template
     const apiType = type === 'webform' ? null : type; // webforms not wired yet
@@ -1225,10 +1334,10 @@ export function useStore() {
       ...prev,
       templates: {
         ...prev.templates,
-        [type]: (prev.templates[type] as any[]).map((t: any) =>
-          (t.templateId || t.scriptId || t.formId) === templateId ? { ...t, name: newName } : t
+        [type]: (prev.templates[type] as AnyTemplate[]).map((t) =>
+          templateRecordId(t) === templateId ? { ...t, name: newName } : t
         ),
-      },
+      } as StoreData['templates'],
     }));
     // API: rename template
     const apiType = type === 'webform' ? null : type;
@@ -1242,10 +1351,10 @@ export function useStore() {
       ...prev,
       templates: {
         ...prev.templates,
-        [type]: (prev.templates[type] as any[]).map((t: any) =>
-          (t.templateId || t.scriptId || t.formId) === templateId ? { ...t, folder: folderName } : t
+        [type]: (prev.templates[type] as AnyTemplate[]).map((t) =>
+          templateRecordId(t) === templateId ? { ...t, folder: folderName } : t
         ),
-      },
+      } as StoreData['templates'],
     }));
   }, []);
 
@@ -1271,7 +1380,8 @@ export function useStore() {
       const folders = prev.templateFolders || [];
       const folder = folders.find((f) => f.folderId === folderId);
       if (!folder) return prev;
-      const clearFolder = (arr: any[]) => arr.map((t: any) => t.folder === folder.name ? { ...t, folder: '' } : t);
+      const clearFolder = <T extends { folder?: string }>(arr: T[]): T[] =>
+        arr.map((t) => t.folder === folder.name ? { ...t, folder: '' } : t);
       return {
         ...prev,
         templateFolders: folders.filter((f) => f.folderId !== folderId),

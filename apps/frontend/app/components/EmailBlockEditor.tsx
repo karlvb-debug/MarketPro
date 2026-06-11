@@ -11,8 +11,8 @@ import type {
   EmailBlock,
   BlockType,
   BlockPreset,
-  HeadingProps,
-  TextProps,
+  BlockProps,
+  BlockStyleProps,
   ImageProps,
   ButtonProps,
   DividerProps,
@@ -43,6 +43,9 @@ import RichTextToolbar from './RichTextToolbar';
 
 // Block types that support style presets
 const PRESET_TYPES: BlockType[] = ['heading', 'text', 'button', 'divider', 'social', 'footer'];
+
+// Block types edited via the rich-text toolbar
+const RICH_TEXT_TYPES = ['text', 'heading', 'footer'];
 
 interface EmailBlockEditorProps {
   design: EmailDesign;
@@ -117,7 +120,6 @@ export default function EmailBlockEditor({ design, onChange, mode = 'email' }: E
   const selectedBlock = design.blocks.find((b) => b.id === selectedBlockId) || null;
 
   // Find the currently selected rich-text block (could be top-level or inside columns)
-  const RICH_TEXT_TYPES = ['text', 'heading', 'footer'];
   const selectedRichTextBlock = useMemo(() => {
     if (!selectedBlockId) return null;
     const topLevel = design.blocks.find(b => b.id === selectedBlockId && RICH_TEXT_TYPES.includes(b.type));
@@ -191,9 +193,9 @@ export default function EmailBlockEditor({ design, onChange, mode = 'email' }: E
     setSelectedBlockId(clone.id);
   }, [design.blocks, updateBlocks]);
 
-  const updateBlockProps = useCallback((id: string, propsPatch: Partial<any>) => {
+  const updateBlockProps = useCallback((id: string, propsPatch: Partial<BlockProps>) => {
     const blocks = design.blocks.map((b) =>
-      b.id === id ? { ...b, props: { ...b.props, ...propsPatch } } : b
+      b.id === id ? { ...b, props: { ...b.props, ...propsPatch } as BlockProps } : b
     );
     updateBlocks(blocks);
   }, [design.blocks, updateBlocks]);
@@ -201,18 +203,18 @@ export default function EmailBlockEditor({ design, onChange, mode = 'email' }: E
   const handleRichTextChange = useCallback(() => {
     if (!textContentRef.current || !selectedRichTextBlock) return;
     const { block, parentId } = selectedRichTextBlock;
-    const propKey = block.type === 'text' ? 'html' : 'text';
     const html = textContentRef.current.innerHTML;
+    const patch: Partial<BlockProps> = block.type === 'text' ? { html } : { text: html };
     if (parentId) {
       const parent = design.blocks.find(b => b.id === parentId);
       if (!parent) return;
       const colProps = parent.props as ColumnsProps;
       const newCols = colProps.columns.map((col) => ({
-        blocks: col.blocks.map((b) => b.id === block.id ? { ...b, props: { ...b.props, [propKey]: html } } : b),
+        blocks: col.blocks.map((b) => b.id === block.id ? { ...b, props: { ...b.props, ...patch } as BlockProps } : b),
       }));
       updateBlockProps(parentId, { columns: newCols });
     } else {
-      updateBlockProps(block.id, { [propKey]: html });
+      updateBlockProps(block.id, patch);
     }
   }, [selectedRichTextBlock, design.blocks, updateBlockProps]);
 
@@ -348,7 +350,7 @@ export default function EmailBlockEditor({ design, onChange, mode = 'email' }: E
             {presets.length === 0 ? (
               <div className="eb-sidebar-presets-empty">
                 <p>No saved styles yet.</p>
-                <p>Select a block and click "Save Style" in the settings panel to create one.</p>
+                <p>Select a block and click &quot;Save Style&quot; in the settings panel to create one.</p>
               </div>
             ) : (
               presets.map((preset) => (
@@ -431,11 +433,11 @@ export default function EmailBlockEditor({ design, onChange, mode = 'email' }: E
                         block,
                         (patch) => updateBlockProps(block.id, patch),
                         // renderBlock callback for columns — simple child rendering
-                        (childBlock, _i, _blocks, _colIdx) => {
-                          const updateChildProps = (p: Record<string, any>) => {
+                        (childBlock) => {
+                          const updateChildProps = (p: Partial<BlockProps>) => {
                             const colProps = block.props as ColumnsProps;
                             const newCols = colProps.columns.map((col) => ({
-                              blocks: col.blocks.map((b) => b.id === childBlock.id ? { ...b, props: { ...b.props, ...p } } : b),
+                              blocks: col.blocks.map((b) => b.id === childBlock.id ? { ...b, props: { ...b.props, ...p } as BlockProps } : b),
                             }));
                             updateBlockProps(block.id, { columns: newCols });
                           };
@@ -556,7 +558,7 @@ export default function EmailBlockEditor({ design, onChange, mode = 'email' }: E
 
 function SettingsPanel({ block, onUpdate, presets, onApplyPreset }: {
   block: EmailBlock;
-  onUpdate: (patch: Partial<any>) => void;
+  onUpdate: (patch: Partial<BlockProps>) => void;
   presets?: BlockPreset[];
   onApplyPreset?: (preset: BlockPreset) => void;
 }) {
@@ -572,7 +574,8 @@ function SettingsPanel({ block, onUpdate, presets, onApplyPreset }: {
     return { top: parts[0], right: parts[1], bottom: parts[2], left: parts[3] };
   };
 
-  const pad = parsePadding((block.props as any).blockPadding);
+  const styleProps = block.props as BlockStyleProps;
+  const pad = parsePadding(styleProps.blockPadding);
   const [linkPadding, setLinkPadding] = useState(pad.top === pad.right && pad.right === pad.bottom && pad.bottom === pad.left);
 
   const updatePadding = (side: string, value: number) => {
@@ -586,9 +589,9 @@ function SettingsPanel({ block, onUpdate, presets, onApplyPreset }: {
   };
 
   // Parse blockBorder
-  const borderWidth = parseInt((block.props as any).blockBorderWidth || '0', 10);
-  const borderColor = (block.props as any).blockBorderColor || '#e2e8f0';
-  const borderRadius = parseInt((block.props as any).blockBorderRadius || '0', 10);
+  const borderWidth = parseInt(styleProps.blockBorderWidth || '0', 10);
+  const borderColor = styleProps.blockBorderColor || '#e2e8f0';
+  const borderRadius = parseInt(styleProps.blockBorderRadius || '0', 10);
 
   return (
     <>
@@ -625,13 +628,13 @@ function SettingsPanel({ block, onUpdate, presets, onApplyPreset }: {
         <input
           type="color"
           className="eb-settings-color eb-settings-color-compact"
-          value={(block.props as any).blockBgColor || '#ffffff'}
+          value={styleProps.blockBgColor || '#ffffff'}
           onChange={(e) => onUpdate({ blockBgColor: e.target.value })}
         />
         <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>
-          {(block.props as any).blockBgColor || 'none'}
+          {styleProps.blockBgColor || 'none'}
         </span>
-        {(block.props as any).blockBgColor && (
+        {styleProps.blockBgColor && (
           <button
             className="btn btn-ghost btn-sm"
             style={{ fontSize: 'var(--text-xs)', padding: '2px 6px' }}
@@ -645,7 +648,7 @@ function SettingsPanel({ block, onUpdate, presets, onApplyPreset }: {
       {/* Background Image */}
       <label className="eb-settings-label">Background Image</label>
       <ImagePicker
-        value={(block.props as any).blockBgImage || ''}
+        value={styleProps.blockBgImage || ''}
         onChange={(url) => onUpdate({ blockBgImage: url || undefined })}
         compact
       />
@@ -725,7 +728,7 @@ function SettingsPanel({ block, onUpdate, presets, onApplyPreset }: {
   );
 }
 
-function SettingsPanelInner({ block, onUpdate }: { block: EmailBlock; onUpdate: (patch: Partial<any>) => void }) {
+function SettingsPanelInner({ block, onUpdate }: { block: EmailBlock; onUpdate: (patch: Partial<BlockProps>) => void }) {
   switch (block.type) {
     case 'heading':
       return null;
@@ -928,7 +931,7 @@ function SettingsPanelInner({ block, onUpdate }: { block: EmailBlock; onUpdate: 
           <label className="eb-settings-label">Field Name</label>
           <input className="eb-settings-input" value={p.fieldName} onChange={(e) => onUpdate({ fieldName: e.target.value })} />
           <label className="eb-settings-label">Input Type</label>
-          <select className="eb-settings-select" value={p.inputType} onChange={(e) => onUpdate({ inputType: e.target.value })}>
+          <select className="eb-settings-select" value={p.inputType} onChange={(e) => onUpdate({ inputType: e.target.value as FormTextInputProps['inputType'] })}>
             <option value="text">Text</option>
             <option value="email">Email</option>
             <option value="tel">Phone</option>

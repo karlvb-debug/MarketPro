@@ -32,6 +32,17 @@ function getDataKey(workspaceId: string) {
 }
 
 // ============================================
+// API row types
+// ============================================
+
+// The backend may return camelCase or snake_case keys
+interface RawWorkspaceRow {
+  workspaceId?: string; workspace_id?: string;
+  name: string;
+  createdAt?: string; created_at?: string;
+}
+
+// ============================================
 // Default workspaces
 // ============================================
 
@@ -94,15 +105,16 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     if (useApiMode && user) {
       api.workspaces.list()
         .then((res) => {
-          const apiWorkspaces = ((res as any)?.data || []).map((w: any) => ({
-            workspaceId: w.workspaceId || w.workspace_id,
+          const rows = (res as { data?: RawWorkspaceRow[] } | null)?.data || [];
+          const apiWorkspaces: Workspace[] = rows.map((w) => ({
+            workspaceId: w.workspaceId || w.workspace_id || '',
             name: w.name,
             slug: w.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
             createdAt: w.createdAt || w.created_at || new Date().toISOString(),
           }));
 
           if (apiWorkspaces.length > 0) {
-            const activeId = apiWorkspaces[0].workspaceId;
+            const activeId = apiWorkspaces[0]!.workspaceId;
             setState({ workspaces: apiWorkspaces, activeWorkspaceId: activeId });
             setActiveWorkspaceId(activeId);
           } else {
@@ -150,7 +162,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       activeWorkspaceId: newWs.workspaceId,
     }));
     if (useApiMode) {
-      api.workspaces.create(name).then((res: any) => {
+      api.workspaces.create(name).then((res) => {
         if (res?.workspaceId) {
           setState((prev) => ({
             ...prev,

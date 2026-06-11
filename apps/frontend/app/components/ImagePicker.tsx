@@ -56,8 +56,8 @@ export default function ImagePicker({ value, onChange, label, compact }: ImagePi
       refreshLibrary();
       onChange(img.dataUrl);
       setUrlInput(img.dataUrl);
-    } catch (err: any) {
-      setError(err.message || 'Upload failed');
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : 'Upload failed');
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
@@ -93,6 +93,7 @@ export default function ImagePicker({ value, onChange, label, compact }: ImagePi
       <div className="img-picker-compact">
         {value ? (
           <div className="img-picker-compact-preview">
+            {/* eslint-disable-next-line @next/next/no-img-element -- preview of user-provided image (often a data URL); next/image cannot optimize these */}
             <img src={value} alt="" className="img-picker-compact-thumb" />
             <button className="btn btn-ghost btn-sm" style={{ fontSize: 'var(--text-xs)', padding: '2px 6px' }} onClick={handleClear}>Remove</button>
             <button className="btn btn-ghost btn-sm" style={{ fontSize: 'var(--text-xs)', padding: '2px 6px' }} onClick={() => setShowLibrary(true)}>Change</button>
@@ -135,6 +136,7 @@ export default function ImagePicker({ value, onChange, label, compact }: ImagePi
       {/* Current preview */}
       {value && (
         <div className="img-picker-preview">
+          {/* eslint-disable-next-line @next/next/no-img-element -- preview of user-provided image (often a data URL); next/image cannot optimize these */}
           <img src={value} alt="" className="img-picker-preview-img" />
           <button className="btn btn-ghost btn-sm" style={{ fontSize: 'var(--text-xs)' }} onClick={handleClear}>Remove</button>
         </div>
@@ -214,6 +216,7 @@ function ImageLibraryGrid({
         <div className="img-lib-grid">
           {images.map((img) => (
             <div key={img.id} className="img-lib-item" onClick={() => onSelect(img)}>
+              {/* eslint-disable-next-line @next/next/no-img-element -- library thumbnails are user-uploaded base64 data URLs; next/image cannot optimize these */}
               <img src={img.dataUrl} alt={img.name} className="img-lib-thumb" />
               <div className="img-lib-meta">
                 <span className="img-lib-name" title={img.name}>{img.name}</span>

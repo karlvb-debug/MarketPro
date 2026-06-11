@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { useStore, Segment, SegmentFolder } from '../lib/store';
+import { useStore, Segment } from '../lib/store';
 import { showToast } from './ui';
 import { useConfirm } from './ConfirmDialog';
 

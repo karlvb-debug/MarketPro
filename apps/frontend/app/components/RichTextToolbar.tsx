@@ -186,7 +186,7 @@ export default function RichTextToolbar({
 
         <Sep />
 
-        <label className="rtt-clr" title="Text color" onMouseDown={(e) => { saveSel(); }}>
+        <label className="rtt-clr" title="Text color" onMouseDown={() => { saveSel(); }}>
           <span className="rtt-clr-icon">A</span>
           <input type="color" className="rtt-clr-input" onChange={(e) => { restoreSel(); exec('foreColor', e.target.value); }} defaultValue="#334155" />
         </label>

@@ -191,6 +191,16 @@ export interface FormSubmitProps {
   blockBorderRadius?: string;
 }
 
+/** Universal block-level style props shared (optionally) by every block type */
+export interface BlockStyleProps {
+  blockBgColor?: string;
+  blockBgImage?: string;
+  blockPadding?: string;
+  blockBorderWidth?: string;
+  blockBorderColor?: string;
+  blockBorderRadius?: string;
+}
+
 export type BlockProps =
   | HeadingProps
   | TextProps

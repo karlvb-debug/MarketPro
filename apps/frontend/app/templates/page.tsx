@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { useStore } from '../lib/store';
+import { useStore, templateRecordId, type AnyTemplate } from '../lib/store';
 import Toolbar from '../components/Toolbar';
 import TemplateFolderPanel from '../components/TemplateFolderPanel';
 import { Button, EmptyState, Modal, Field, Input, Textarea, FormActions, showToast } from '../components/ui';
@@ -10,7 +10,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 type ContentType = 'email' | 'sms' | 'voice' | 'webform';
 
 // Normalize template ID across types
-function getTplId(t: any): string { return t.templateId || t.scriptId || t.formId; }
+function getTplId(t: AnyTemplate): string { return templateRecordId(t); }
 
 const TYPE_LABELS: Record<ContentType, { singular: string; plural: string; icon: string }> = {
   email: { singular: 'Email', plural: 'Emails', icon: '@' },
@@ -55,26 +55,26 @@ export default function TemplatesPage() {
 
   // Filter templates by type, folder, and search
   const displayItems = useMemo(() => {
-    let list = templates[activeType] as any[];
+    let list: AnyTemplate[] = templates[activeType];
 
     // Folder filter
     if (activeFolderId === '__uncategorized__') {
-      list = list.filter((t: any) => !t.folder);
+      list = list.filter((t) => !t.folder);
     } else if (activeFolder) {
-      list = list.filter((t: any) => t.folder === activeFolder.name);
+      list = list.filter((t) => t.folder === activeFolder.name);
     }
 
     // Search filter
     if (search) {
       const q = search.toLowerCase();
-      list = list.filter((t: any) =>
+      list = list.filter((t) =>
         t.name.toLowerCase().includes(q) ||
-        (t.subjectLine && t.subjectLine.toLowerCase().includes(q)) ||
-        (t.body && t.body.toLowerCase().includes(q))
+        ('subjectLine' in t && t.subjectLine.toLowerCase().includes(q)) ||
+        ('body' in t && t.body.toLowerCase().includes(q))
       );
     }
 
-    return list.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+    return list.sort((a, b) => (a.order || 0) - (b.order || 0));
   }, [templates, activeType, activeFolderId, activeFolder, search]);
 
   const labels = TYPE_LABELS[activeType];
@@ -135,7 +135,7 @@ export default function TemplatesPage() {
 
   // Preview item
   const previewItem = previewId
-    ? (templates[activeType] as any[]).find((t: any) => getTplId(t) === previewId)
+    ? (templates[activeType] as AnyTemplate[]).find((t) => getTplId(t) === previewId)
     : null;
 
   return (
@@ -208,7 +208,7 @@ export default function TemplatesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {displayItems.map((item: any) => {
+                  {displayItems.map((item) => {
                     const id = getTplId(item);
                     const isActive = previewId === id;
                     return (
@@ -223,18 +223,18 @@ export default function TemplatesPage() {
                         }}
                       >
                         <td className="text-primary font-medium">{item.name}</td>
-                        {activeType === 'email' && (
+                        {activeType === 'email' && 'subjectLine' in item && (
                           <td className="text-secondary">{item.subjectLine || <span className="text-tertiary">—</span>}</td>
                         )}
-                        {activeType === 'sms' && (
+                        {activeType === 'sms' && 'body' in item && (
                           <td>
                             <span className="tpl-sms-inline-preview">{item.body}</span>
                           </td>
                         )}
-                        {activeType === 'voice' && (
+                        {activeType === 'voice' && 'voiceId' in item && (
                           <td className="text-secondary">{item.voiceId}</td>
                         )}
-                        {activeType === 'webform' && (
+                        {activeType === 'webform' && 'fields' in item && (
                           <td className="text-secondary">{item.fields?.length || 0} field{(item.fields?.length || 0) !== 1 ? 's' : ''}</td>
                         )}
                         <td>
@@ -245,7 +245,7 @@ export default function TemplatesPage() {
                           )}
                         </td>
                         <td className="text-tertiary text-xs" >
-                          {item.updatedAt
+                          {'updatedAt' in item && item.updatedAt
                             ? new Date(item.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                             : '—'}
                         </td>
@@ -274,7 +274,7 @@ export default function TemplatesPage() {
               <Button variant="ghost" size="sm" onClick={() => setPreviewId(null)}>✕</Button>
             </div>
             <div className="tpl-preview-body">
-              {activeType === 'email' && (
+              {activeType === 'email' && 'subjectLine' in previewItem && (
                 <>
                   <div className="tpl-preview-field">
                     <span className="tpl-preview-label">Subject</span>
@@ -295,7 +295,7 @@ export default function TemplatesPage() {
                   </div>
                 </>
               )}
-              {activeType === 'sms' && (
+              {activeType === 'sms' && 'estimatedSegments' in previewItem && (
                 <>
                   <div className="tpl-preview-field">
                     <span className="tpl-preview-label">Message</span>
@@ -311,7 +311,7 @@ export default function TemplatesPage() {
                   </div>
                 </>
               )}
-              {activeType === 'voice' && (
+              {activeType === 'voice' && 'voiceId' in previewItem && (
                 <>
                   <div className="tpl-preview-field">
                     <span className="tpl-preview-label">Voice ID</span>
@@ -326,7 +326,7 @@ export default function TemplatesPage() {
                   </div>
                 </>
               )}
-              {activeType === 'webform' && (
+              {activeType === 'webform' && 'formId' in previewItem && (
                 <>
                   <div className="tpl-preview-field">
                     <span className="tpl-preview-label">Description</span>
@@ -336,7 +336,7 @@ export default function TemplatesPage() {
                     <span className="tpl-preview-label">Fields ({previewItem.fields?.length || 0})</span>
                   </div>
                   <div className="tpl-preview-form-fields">
-                    {(previewItem.fields || []).map((f: any) => (
+                    {(previewItem.fields || []).map((f) => (
                       <div key={f.fieldId} className="tpl-preview-form-field-item">
                         <span>{f.label}</span>
                         <span className="text-tertiary text-xs" >{f.type}{f.required ? ' •' : ''}</span>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { useStore, Contact, SuppressionReason, getOverallStatus } from '../lib/store';
+import { useStore, Contact } from '../lib/store';
 import Toolbar from '../components/Toolbar';
 import DataTable from '../components/DataTable';
 import { Button, EmptyState, Modal, Field, Input, Select, Checkbox, FormActions, showToast } from '../components/ui';
@@ -13,7 +13,7 @@ import { validatePhone } from '../lib/contact-utils';
 
 export default function ContactsPage() {
   const {
-    contacts, segments, settings, addContact, updateContact, updateCompliance, deleteContact,
+    contacts, segments, settings, addContact, updateContact, deleteContact,
     importContacts, bulkDeleteContacts, addContactsToSegment, removeContactsFromSegment, hydrated,
     refreshContacts, contactsMeta, contactsLoading, setContactsFilter, loadContacts,
   } = useStore();
@@ -71,7 +71,7 @@ export default function ContactsPage() {
     const view: SavedView = {
       id: crypto.randomUUID(),
       name: newViewName.trim(),
-      filters: filters.map(({ id, ...rest }) => ({ ...rest, id: crypto.randomUUID() })),
+      filters: filters.map((f) => ({ ...f, id: crypto.randomUUID() })),
       segmentId: activeSegmentId,
     };
     persistViews([...savedViews, view]);
@@ -170,7 +170,11 @@ export default function ContactsPage() {
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
       return next;
     });
   };
@@ -363,7 +367,7 @@ export default function ContactsPage() {
                     <select
                       className="filter-chip-operator"
                       value={f.operator}
-                      onChange={(e) => updateFilter(f.id, { operator: e.target.value as any })}
+                      onChange={(e) => updateFilter(f.id, { operator: e.target.value as ActiveFilter['operator'] })}
                     >
                       <option value="contains">contains</option>
                       <option value="equals">equals</option>

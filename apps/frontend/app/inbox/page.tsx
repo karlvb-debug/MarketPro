@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { useStore, InboxMessage } from '../lib/store';
+import { useStore } from '../lib/store';
 import PageHeader from '../components/PageHeader';
 import { Button, EmptyState, SearchInput } from '../components/ui';
 

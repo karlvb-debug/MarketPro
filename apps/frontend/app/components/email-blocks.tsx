@@ -24,7 +24,8 @@ import type {
   FormCheckboxProps,
   FormRadioProps,
   FormSubmitProps,
-  BlockType,
+  BlockProps,
+  BlockStyleProps,
 } from '../lib/email-templates';
 
 // --- Block wrapper (handles selection, hover, toolbar) ---
@@ -49,12 +50,13 @@ export function BlockWrapper({
   block, selected, onSelect, onDelete, onMoveUp, onMoveDown, onDuplicate,
   isFirst, isLast, children, draggable, onDragStart, onDragEnd,
 }: BlockWrapperProps) {
-  const bgColor = (block.props as any)?.blockBgColor || undefined;
-  const bgImage = (block.props as any)?.blockBgImage || undefined;
-  const blockPadding = (block.props as any)?.blockPadding || undefined;
-  const blockBorderWidth = (block.props as any)?.blockBorderWidth || undefined;
-  const blockBorderColor = (block.props as any)?.blockBorderColor || undefined;
-  const blockBorderRadius = (block.props as any)?.blockBorderRadius || undefined;
+  const styleProps = block.props as BlockStyleProps;
+  const bgColor = styleProps.blockBgColor || undefined;
+  const bgImage = styleProps.blockBgImage || undefined;
+  const blockPadding = styleProps.blockPadding || undefined;
+  const blockBorderWidth = styleProps.blockBorderWidth || undefined;
+  const blockBorderColor = styleProps.blockBorderColor || undefined;
+  const blockBorderRadius = styleProps.blockBorderRadius || undefined;
   const blockStyle: React.CSSProperties = {};
   if (bgColor) blockStyle.backgroundColor = bgColor;
   if (bgImage) {
@@ -180,6 +182,7 @@ export function ImageBlockPreview({ props }: { props: ImageProps }) {
   }
   return (
     <div className="eb-block-image" style={{ textAlign: 'center' }}>
+      {/* eslint-disable-next-line @next/next/no-img-element -- user-provided email content image (arbitrary/data URLs); next/image is not appropriate here */}
       <img
         src={props.src}
         alt={props.alt}
@@ -222,7 +225,7 @@ export function SpacerBlockPreview({ props }: { props: SpacerProps }) {
   );
 }
 
-export function ColumnsBlockPreview({ props, onUpdate, renderBlock, selectedBlockId, onSelectBlock, getColumnDropProps }: {
+export function ColumnsBlockPreview({ props, renderBlock, getColumnDropProps }: {
   props: ColumnsProps;
   onUpdate: (p: Partial<ColumnsProps>) => void;
   renderBlock: (block: EmailBlock, index: number, blocks: EmailBlock[], colIndex: number) => React.ReactNode;
@@ -474,7 +477,7 @@ export function FormSubmitPreview({ props }: { props: FormSubmitProps }) {
 
 export function renderBlockPreview(
   block: EmailBlock,
-  onUpdate: (props: Partial<any>) => void,
+  onUpdate: (props: Partial<BlockProps>) => void,
   renderBlock?: (block: EmailBlock, index: number, blocks: EmailBlock[], colIndex: number) => React.ReactNode,
   selectedBlockId?: string | null,
   onSelectBlock?: (id: string) => void,
