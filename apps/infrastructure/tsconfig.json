@@ -21,9 +21,7 @@
     "experimentalDecorators": true,
     "strictPropertyInitialization": false,
     "skipLibCheck": true,
-    "typeRoots": [
-      "./node_modules/@types"
-    ]
+    "isolatedModules": true
   },
   "exclude": [
     "node_modules",

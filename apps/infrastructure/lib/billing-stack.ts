@@ -70,7 +70,8 @@ export class BillingStack extends cdk.Stack {
       securityGroups: [props.lambdaSecurityGroup],
       environment: {
         IDEMPOTENCY_TABLE: props.idempotencyTable.tableName,
-        DATABASE_URL: `postgresql://${props.database.instanceEndpoint.hostname}:5432/marketingsaas`,
+        DATABASE_SECRET_ARN: props.dbSecret.secretArn,
+        DATABASE_HOST: props.database.instanceEndpoint.hostname,
       },
     });
 
@@ -85,6 +86,13 @@ export class BillingStack extends cdk.Stack {
     }));
 
     // 6. Deploy Stripe Webhook Lambda
+    // Stripe secrets live in Secrets Manager (created out-of-band, referenced by name).
+    // The Lambda receives the ARNs and resolves the values at runtime.
+    const stripeSecret = secretsmanager.Secret.fromSecretNameV2(
+      this, 'StripeSecret', 'marketing-saas/stripe-secret');
+    const stripeWebhookSecret = secretsmanager.Secret.fromSecretNameV2(
+      this, 'StripeWebhookSecret', 'marketing-saas/stripe-webhook-secret');
+
     const stripeWebhookLambda = new lambdaNodejs.NodejsFunction(this, 'StripeWebhookFunction', {
       runtime: lambda.Runtime.NODEJS_20_X,
       entry: path.join(__dirname, '../lambda/stripe-webhook.ts'),
@@ -95,15 +103,16 @@ export class BillingStack extends cdk.Stack {
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       securityGroups: [props.lambdaSecurityGroup],
       environment: {
-        // Stripe secrets are read at runtime from Secrets Manager, not plaintext env vars.
-        // The Lambda reads these ARNs and fetches the actual secrets securely.
-        STRIPE_SECRET_ARN: 'arn:aws:secretsmanager:us-east-1:ACCOUNT:secret:marketing-saas/stripe-secret',
-        STRIPE_WEBHOOK_SECRET_ARN: 'arn:aws:secretsmanager:us-east-1:ACCOUNT:secret:marketing-saas/stripe-webhook-secret',
-        DATABASE_URL: `postgresql://${props.database.instanceEndpoint.hostname}:5432/marketingsaas`,
+        STRIPE_SECRET_ARN: stripeSecret.secretArn,
+        STRIPE_WEBHOOK_SECRET_ARN: stripeWebhookSecret.secretArn,
+        DATABASE_SECRET_ARN: props.dbSecret.secretArn,
+        DATABASE_HOST: props.database.instanceEndpoint.hostname,
       },
     });
 
-    // Grant Stripe Lambda access to RDS
+    // Grant Stripe Lambda access to its secrets and RDS credentials
+    stripeSecret.grantRead(stripeWebhookLambda);
+    stripeWebhookSecret.grantRead(stripeWebhookLambda);
     props.dbSecret.grantRead(stripeWebhookLambda);
 
 

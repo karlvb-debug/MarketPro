@@ -36,3 +36,10 @@ yarn-error.log*
 # Misc
 .DS_Store
 *.pem
+
+# CDK
+cdk.out/
+cdk-outputs.json
+
+# Backup files
+*.bak

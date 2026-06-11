@@ -1,54 +1,79 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import Stripe from 'stripe';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
 import { accountBalances, transactionsLedger } from '../drizzle/schema';
 import { eq, sql } from 'drizzle-orm';
+import { getDb } from './lib/db';
 
+let stripeClient: Stripe.Stripe | null = null;
+let webhookSecret: string | null = null;
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
+/**
+ * Resolve a secret value: prefer Secrets Manager (ARN env var),
+ * fall back to a plaintext env var for local development only.
+ */
+async function resolveSecret(arnEnvVar: string, plainEnvVar: string): Promise<string> {
+  const arn = process.env[arnEnvVar];
+  if (arn) {
+    const { SecretsManagerClient, GetSecretValueCommand } = await import('@aws-sdk/client-secrets-manager');
+    const smClient = new SecretsManagerClient({});
+    const secret = await smClient.send(new GetSecretValueCommand({ SecretId: arn }));
+    if (!secret.SecretString) {
+      throw new Error(`Secret ${arnEnvVar} resolved to an empty value`);
+    }
+    return secret.SecretString;
+  }
+  const plain = process.env[plainEnvVar];
+  if (!plain) {
+    throw new Error(`Neither ${arnEnvVar} nor ${plainEnvVar} is configured`);
+  }
+  return plain;
+}
 
-let pool: Pool | null = null;
-let db: ReturnType<typeof drizzle<Record<string, unknown>>> | null = null;
-
-const getDbConnection = async () => {
-    if (db) return db;
-    pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
-    db = drizzle(pool);
-    return db;
-};
+/** Lazily initialize the Stripe client and webhook secret (cached across warm starts). */
+async function getStripe(): Promise<{ stripe: Stripe.Stripe; webhookSecret: string }> {
+  if (!stripeClient || !webhookSecret) {
+    const [secretKey, whSecret] = await Promise.all([
+      resolveSecret('STRIPE_SECRET_ARN', 'STRIPE_SECRET_KEY'),
+      resolveSecret('STRIPE_WEBHOOK_SECRET_ARN', 'STRIPE_WEBHOOK_SECRET'),
+    ]);
+    stripeClient = new Stripe(secretKey);
+    webhookSecret = whSecret;
+  }
+  return { stripe: stripeClient, webhookSecret };
+}
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   const signature = event.headers['Stripe-Signature'] || event.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
   try {
-    if (!signature || !webhookSecret) {
-      throw new Error('Missing Stripe Signature or Secret');
+    const { stripe, webhookSecret: whSecret } = await getStripe();
+
+    if (!signature) {
+      throw new Error('Missing Stripe-Signature header');
     }
 
     // 1. Verify the secure webhook payload using official Stripe library
     // We must pass the raw body string to constructEvent
-    const stripeEvent = stripe.webhooks.constructEvent(event.body || '', signature, webhookSecret);
+    const stripeEvent = stripe.webhooks.constructEvent(event.body || '', signature, whSecret);
 
     if (stripeEvent.type === 'payment_intent.succeeded') {
       const paymentIntent = stripeEvent.data.object;
-      
+
       // We encode the workspaceId into the Payment Intent metadata when the frontend creates the checkout session
-      const workspaceId = paymentIntent.metadata?.workspace_id; 
-      
+      const workspaceId = paymentIntent.metadata?.workspace_id;
+
       if (!workspaceId) {
           console.error(`Payment Intent ${paymentIntent.id} has no workspace_id mapped.`);
           return { statusCode: 200, body: 'Ignored: No Workspace Mapped' }; // Return 200 so Stripe doesn't retry
       }
 
       console.log(`Processing ${paymentIntent.amount} deposit for Workspace ${workspaceId}`);
-      
+
       // Amount is in cents, convert to standard numeric scalar (e.g. 5000 -> 50.00)
       const depositAmount = (paymentIntent.amount / 100).toString();
 
-      // 2. Connect to database
-      const currentDb = await getDbConnection();
+      // 2. Connect to database (credentials from Secrets Manager via shared client)
+      const currentDb = await getDb();
 
       // 3. Execute the Double-Entry DEPOSIT Transaction using Drizzle ORM
       await currentDb.transaction(async (tx) => {
@@ -64,7 +89,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
           // Increment available_credits safely using raw SQL math within Drizzle to avoid race conditions
           // This replicates what the authorize_campaign_funds pl/pgsql function does!
           await tx.update(accountBalances)
-            .set({ 
+            .set({
                availableCredits: sql`${accountBalances.availableCredits} + ${depositAmount}`,
                lastUpdatedAt: sql`CURRENT_TIMESTAMP`
             })
@@ -80,7 +105,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       body: JSON.stringify({ received: true }),
     };
 
-  } catch (err: any) {
+  } catch (err) {
     console.error('Stripe webhook verification failed:', err);
     return {
       statusCode: 400,
