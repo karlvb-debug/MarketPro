@@ -1,6 +1,6 @@
 # Contacts Module — Deep Feature Plan
 
-> Status: PLANNED · Created June 12, 2026
+> Status: C1 ✅ DONE (June 12, 2026) · C2–C5 planned · Created June 12, 2026
 > Goal: make contact management the strongest part of the product — typed
 > custom fields, rule-based dynamic segments, server-side filtering and
 > views, per-contact send history and consent evidence, dedup/merge, and
@@ -67,7 +67,7 @@ Everything else in this plan composes with that engine.
 
 ## 3. Phases
 
-### C1 — Typed custom fields + server-side filtering (~1 week)
+### C1 — Typed custom fields + server-side filtering (~1 week) — ✅ DONE
 
 *The foundation: the field registry must know about custom fields before
 the rule engine can use them.*
