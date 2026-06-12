@@ -11,8 +11,8 @@ import type {
   Segment,
   WorkspaceSettings,
   CustomField,
-} from './store';
-import { defaultCompliance } from './store';
+} from './store/types';
+import { defaultCompliance } from './store/seed';
 
 // ============================================
 // API row types (what the backend returns)
