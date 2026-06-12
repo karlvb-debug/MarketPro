@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, ApiError } from './api-client';
 import { contactToApi, settingsToApi } from './api-mappers';
+import { showToast } from '../components/ui/Toast';
 
 // ============================================
 // Types matching the database schema
@@ -660,14 +661,18 @@ export function useStore() {
     }
   }, [data.contacts, data.segments]);
 
-  const updateContact = useCallback(async (contactId: string, patch: Partial<Omit<Contact, 'contactId' | 'createdAt'>>) => {
-    // Optimistic local update
-    setData((prev) => ({
-      ...prev,
-      contacts: prev.contacts.map((c) =>
-        c.contactId === contactId ? { ...c, ...patch } : c
-      ),
-    }));
+  const updateContact = useCallback(async (contactId: string, patch: Partial<Omit<Contact, 'contactId' | 'createdAt'>>): Promise<string | null> => {
+    // Snapshot for rollback, then optimistic local update
+    let snapshot: Contact | undefined;
+    setData((prev) => {
+      snapshot = prev.contacts.find((c) => c.contactId === contactId);
+      return {
+        ...prev,
+        contacts: prev.contacts.map((c) =>
+          c.contactId === contactId ? { ...c, ...patch } : c
+        ),
+      };
+    });
 
     // Persist to server — use returned row as canonical state
     try {
@@ -691,17 +696,31 @@ export function useStore() {
           }),
         }));
       }
+      return null;
     } catch (err) {
       console.error('[API] Update contact failed:', err);
+      // Roll back the optimistic update — the server is the source of truth
+      const restore = snapshot;
+      if (restore) {
+        setData((prev) => ({
+          ...prev,
+          contacts: prev.contacts.map((c) => (c.contactId === contactId ? restore : c)),
+        }));
+      }
+      const message = (err as Partial<ApiError> | null)?.message || 'Failed to save contact — changes were reverted.';
+      showToast(message, 'error');
+      return message;
     }
   }, []);
 
-  const updateCompliance = useCallback(async (contactId: string, channel: 'email' | 'sms' | 'voice', reason: SuppressionReason, isDnc = false) => {
-    // Optimistic local update
+  const updateCompliance = useCallback(async (contactId: string, channel: 'email' | 'sms' | 'voice', reason: SuppressionReason, isDnc = false): Promise<string | null> => {
+    // Snapshot for rollback, then optimistic local update
+    let snapshot: Contact | undefined;
     setData((prev) => ({
       ...prev,
       contacts: prev.contacts.map((c) => {
         if (c.contactId !== contactId) return c;
+        snapshot = c;
         const compliance = { ...c.compliance };
         if (isDnc) {
           // DNC suppresses ALL channels
@@ -738,8 +757,20 @@ export function useStore() {
       }
 
       await api.contacts.update(contactId, { status: dbStatus });
+      return null;
     } catch (err) {
       console.error('[API] Update compliance failed:', err);
+      // Roll back the optimistic compliance change
+      const restore = snapshot;
+      if (restore) {
+        setData((prev) => ({
+          ...prev,
+          contacts: prev.contacts.map((c) => (c.contactId === contactId ? restore : c)),
+        }));
+      }
+      const message = (err as Partial<ApiError> | null)?.message || 'Failed to update compliance — change was reverted.';
+      showToast(message, 'error');
+      return message;
     }
   }, []);
 
@@ -794,8 +825,17 @@ export function useStore() {
       console.error('[API] Bulk delete failed:', err);
     }
   }, []);
-  // Returns { added, skipped, blankSkipped } — skips contacts with duplicate email/phone and blank/unidentifiable rows
-  const importContacts = useCallback((newContacts: Omit<Contact, 'contactId' | 'createdAt' | 'compliance'>[]): { added: number; updated: number; skipped: number; blankSkipped: number } => {
+  // Guard against overlapping imports interleaving state mutations
+  const importInFlightRef = useRef(false);
+
+  // Returns counts plus `serverError` when persistence (partially) failed.
+  // Local state is applied synchronously; the server upsert is awaited so
+  // the caller can tell the user whether the import actually saved.
+  const importContacts = useCallback(async (newContacts: Omit<Contact, 'contactId' | 'createdAt' | 'compliance'>[]): Promise<{ added: number; updated: number; skipped: number; blankSkipped: number; serverError: string | null }> => {
+    if (importInFlightRef.current) {
+      return { added: 0, updated: 0, skipped: 0, blankSkipped: 0, serverError: 'An import is already in progress — wait for it to finish.' };
+    }
+    importInFlightRef.current = true;
     let added = 0;
     let updated = 0;
     let skipped = 0;
@@ -930,32 +970,42 @@ export function useStore() {
       ...updatedPayload.map((c) => contactToApi(c)),
     ];
 
-    if (allImports.length > 0) {
-      // Find segmentId from the first contact's segments
-      let segmentId: string | undefined;
-      const firstWithSegment = newContacts.find(c => c.segments && c.segments.length > 0);
-      if (firstWithSegment && firstWithSegment.segments?.[0]) {
-        const seg = data.segments.find(s => s.name === firstWithSegment.segments[0]);
-        if (seg) segmentId = seg.segmentId;
-      }
+    let serverError: string | null = null;
+    try {
+      if (allImports.length > 0) {
+        // Find segmentId from the first contact's segments
+        let segmentId: string | undefined;
+        const firstWithSegment = newContacts.find(c => c.segments && c.segments.length > 0);
+        if (firstWithSegment && firstWithSegment.segments?.[0]) {
+          const seg = data.segments.find(s => s.name === firstWithSegment.segments[0]);
+          if (seg) segmentId = seg.segmentId;
+        }
 
-      const chunkSize = 1000;
-      const chunks: Record<string, unknown>[][] = [];
-      for (let i = 0; i < allImports.length; i += chunkSize) {
-        chunks.push(allImports.slice(i, i + chunkSize));
+        const chunkSize = 1000;
+        const chunks: Record<string, unknown>[][] = [];
+        for (let i = 0; i < allImports.length; i += chunkSize) {
+          chunks.push(allImports.slice(i, i + chunkSize));
+        }
+        // Await every chunk: the user must know whether the import saved.
+        const results = await Promise.allSettled(
+          chunks.map((chunk) => api.contacts.import(chunk, segmentId))
+        );
+        const failures = results.filter((r) => r.status === 'rejected');
+        if (failures.length > 0) {
+          const first = failures[0] as PromiseRejectedResult;
+          const detail = (first.reason as Partial<ApiError> | null)?.message || 'server error';
+          serverError = failures.length === chunks.length
+            ? `Import failed to save: ${detail}`
+            : `Import partially saved — ${failures.length} of ${chunks.length} batches failed (${detail}). Re-run the import to retry; existing contacts are deduplicated.`;
+          console.error('[API] Import chunks failed:', failures);
+        }
       }
-      // Fire chunks in parallel (they're independent upserts)
-      apiCall(() =>
-        Promise.all(
-          chunks.map((chunk) =>
-            api.contacts.import(chunk, segmentId)
-          )
-        )
-      );
+    } finally {
+      importInFlightRef.current = false;
     }
 
-    return { added, updated, skipped, blankSkipped };
-  }, [apiCall, data.segments]);
+    return { added, updated, skipped, blankSkipped, serverError };
+  }, [data.segments]);
 
   // ---- CAMPAIGNS ----
 

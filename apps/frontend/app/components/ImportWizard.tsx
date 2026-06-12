@@ -29,7 +29,7 @@ interface ImportWizardProps {
   activeSegmentId?: string;
   importContacts: (
     contacts: Omit<Contact, 'contactId' | 'createdAt' | 'compliance'>[]
-  ) => { added: number; updated: number; skipped: number; blankSkipped?: number };
+  ) => Promise<{ added: number; updated: number; skipped: number; blankSkipped?: number; serverError?: string | null }>;
   refreshContacts?: () => Promise<void>;
 }
 
@@ -303,7 +303,11 @@ export default function ImportWizard({
       consentSource: (consentSource || 'unknown') as Contact['consentSource'],
     }));
 
-    const importResult = importContacts(contactsToImport);
+    const importResult = await importContacts(contactsToImport);
+    if (importResult.serverError) {
+      // Local state may be ahead of the server — tell the user explicitly
+      showToast(importResult.serverError, 'error');
+    }
     setResult({
       added: importResult.added,
       updated: importResult.updated,
