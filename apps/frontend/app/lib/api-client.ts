@@ -33,6 +33,12 @@ export interface ApiError {
   status: number;
   message: string;
   code?: string;
+  /** Per-key custom-field validation errors (POST /contacts 400) */
+  fieldErrors?: Record<string, string>;
+  /** Required custom-field keys missing a value (POST /contacts 400) */
+  missingRequired?: string[];
+  /** Unique custom-field keys whose values are already in use (POST /contacts 409) */
+  fields?: string[];
 }
 
 export interface ApiResponse<T> {
