@@ -3,7 +3,7 @@
 // Skipped unless TEST_DATABASE_URL is set.
 
 import { Pool } from 'pg';
-import { SCHEMA_SQL } from '../lambda/db-migrate';
+import { runMigrations } from '../lambda/lib/migrate';
 import { executeRightToBeForgotten } from '../lambda/lib/gdpr';
 import { performUnsubscribe, revokeConsent, restoreSmsConsent, emailHashOf, phoneHashOf } from '../lambda/lib/consent';
 
@@ -15,7 +15,7 @@ describeDb('compliance (Postgres integration)', () => {
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: TEST_DATABASE_URL, max: 5 });
-    await pool.query(SCHEMA_SQL);
+    await runMigrations(pool);
   });
 
   afterAll(async () => {

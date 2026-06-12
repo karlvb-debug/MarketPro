@@ -18,6 +18,8 @@ export interface SmsStackProps extends cdk.StackProps {
   database: rds.DatabaseInstance;
   dbSecret: secretsmanager.ISecret;
   opsAlertsTopic: sns.ITopic;
+  /** Deployment stage: 'dev' (default) | 'staging' | 'prod'. */
+  stage?: string;
 }
 
 export class SmsStack extends cdk.Stack {
@@ -25,6 +27,9 @@ export class SmsStack extends cdk.Stack {
 
   constructor(scope: Construct, id: string, props: SmsStackProps) {
     super(scope, id, props);
+
+    const stage = props.stage ?? 'dev';
+    const named = (base: string) => (stage === 'dev' ? base : `${base}-${stage}`);
 
     // 1. Deploy the Timezone Resolution Engine (Waterfall lookup)
     const timezoneEngineLambda = new lambdaNodejs.NodejsFunction(this, 'TimezoneResolutionFunction', {
@@ -40,7 +45,7 @@ export class SmsStack extends cdk.Stack {
 
     // 2. Dedicated SNS Topic for Inbound Two-Way messages
     const inboundSmsTopic = new sns.Topic(this, 'InboundSmsTopic', {
-        topicName: 'marketing-saas-inbound-sms',
+        topicName: named('marketing-saas-inbound-sms'),
     });
 
     // 2.5. Inbound SMS handler — logs to sms_inbox and processes STOP/HELP/

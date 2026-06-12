@@ -123,7 +123,8 @@ export class EmailStack extends cdk.Stack {
     props.dbSecret.grantRead(dispatchLambda);
     this.emailDispatchQueue.grantConsumeMessages(dispatchLambda);
 
-    // Grant SES sending permissions
+    // Grant SES sending permissions, scoped to this account's verified
+    // identities (sending FROM an identity requires the identity resource)
     dispatchLambda.addToRolePolicy(
       new cdk.aws_iam.PolicyStatement({
         actions: [
@@ -131,7 +132,10 @@ export class EmailStack extends cdk.Stack {
           "ses:SendRawEmail",
           "ses:SendTemplatedEmail",
         ],
-        resources: ["*"],
+        resources: [
+          `arn:aws:ses:${this.region}:${this.account}:identity/*`,
+          `arn:aws:ses:${this.region}:${this.account}:configuration-set/*`,
+        ],
       }),
     );
 

@@ -52,13 +52,26 @@ npm run build          # build all workspaces
 
 ```sh
 cd apps/infrastructure
-npx cdk deploy --all --outputs-file cdk-outputs.json
+npx cdk deploy --all --context stage=staging   # or stage=prod / omit for dev
 ```
 
+Stages: `dev` (default, legacy unsuffixed names), `staging`, `prod` — stack
+and physical resource names are namespaced per stage so they coexist in one
+account. `prod` enables Multi-AZ, storage encryption, deletion protection,
+and 14-day backups.
+
+CD: pushes to `main` deploy **staging** automatically
+(`.github/workflows/deploy.yml`); production is a `workflow_dispatch` gated
+by the `production` GitHub environment. One-time setup: an OIDC deploy role
+in `AWS_DEPLOY_ROLE_ARN` and the two GitHub environments.
+
+Database migrations are versioned (`apps/infrastructure/database/migrations/`)
+and apply automatically on every deploy via a CDK Trigger; add a new
+`NNNN-description.ts` and register it in `migrations/index.ts`. The runner is
+transactional, tracked in `schema_migrations`, and concurrency-safe.
+
 `cdk-outputs.json` contains live account/resource identifiers and is
-intentionally gitignored — never commit it. Database migrations currently run
-via the `db-migrate` Lambda (invoke manually after deploy); see
-FOUNDATION_REVIEW.md M5 for the planned move to versioned migrations.
+intentionally gitignored — never commit it.
 
 Optional deploy-time env vars:
 

@@ -1,16 +1,18 @@
 // ============================================
 // Campaigns CRUD Lambda
 // GET /campaigns — list
-// POST /campaigns — create (+ authorization hold + dispatch)
+// POST /campaigns — create; due-now campaigns are launched immediately
+// (claim → authorization hold → SQS), future ones are picked up by the
+// scheduled-dispatch poller.
 // ============================================
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { and, eq, isNotNull } from 'drizzle-orm';
-import { sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { getDb, getPool, respond, getWorkspaceId, getUserId, requireRole } from '../lib/db';
-import { authorizeCampaignFunds, getChannelPrice, multiplyPrice, Channel } from '../lib/billing';
-import { campaigns, contacts, contactSegment } from '../../drizzle/schema';
+import { launchCampaign } from '../lib/campaign-launch';
+import { Channel } from '../lib/billing';
+import { campaigns } from '../../drizzle/schema';
 
 const sqs = new SQSClient({});
 
@@ -53,72 +55,53 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       if (writeDenied) return writeDenied;
 
       const body = JSON.parse(event.body || '{}');
+      const scheduledAt = body.scheduled_at ? new Date(body.scheduled_at) : null;
+      const isFutureSend = scheduledAt !== null && scheduledAt > new Date();
+
       const [row] = await db.insert(campaigns).values({
         workspaceId,
         name: body.name || 'New Campaign',
         channel: body.channel || 'email',
         templateId: body.template_id || body.templateId,
         segmentId: body.segment_id || body.segmentId,
-        status: body.status || 'draft',
-        scheduledAt: body.scheduled_at ? new Date(body.scheduled_at) : null,
+        // Future sends are 'scheduled' so the dispatch poller picks them up
+        status: isFutureSend ? 'scheduled' : (body.status || 'draft'),
+        scheduledAt,
       }).returning();
 
       const channel = row.channel as Channel;
       const queueUrl = QUEUE_URLS[channel];
-      const dueNow = !row.scheduledAt || row.scheduledAt <= new Date();
 
-      if (queueUrl && dueNow) {
-        // 1. Estimate: eligible recipients x per-message price.
-        // (Scheduled-in-future campaigns are authorized when they fire — M5.)
-        const recipientColumn = channel === 'email' ? contacts.email : contacts.phone;
-        const [{ count }] = await db
-          .select({ count: sql<number>`count(*)::int` })
-          .from(contactSegment)
-          .innerJoin(contacts, eq(contactSegment.contactId, contacts.contactId))
-          .where(
-            and(
-              eq(contactSegment.segmentId, row.segmentId),
-              eq(contacts.status, 'active'),
-              isNotNull(recipientColumn),
-            ),
-          );
-
+      if (queueUrl && !isFutureSend) {
         const pool = await getPool();
-        const price = await getChannelPrice(pool, workspaceId, channel);
-        const estimatedCost = await multiplyPrice(pool, price, count);
-
-        // 2. Authorization hold: available -> hold, atomic balance check.
-        if (parseFloat(estimatedCost) > 0) {
-          const auth = await authorizeCampaignFunds(pool, workspaceId, row.campaignId, estimatedCost);
-          if (!auth.ok) {
-            // Campaign stays in draft — nothing was queued, nothing was held.
-            return respond(402, {
-              message: 'Insufficient credits to send this campaign',
-              campaignId: row.campaignId,
-              required: auth.required,
-              available: auth.available,
-              recipients: count,
-            });
-          }
-        }
-
-        // 3. Queue the dispatch and mark sending.
-        await db
-          .update(campaigns)
-          .set({ estimatedCost })
-          .where(eq(campaigns.campaignId, row.campaignId));
-
-        await sqs.send(new SendMessageCommand({
-          QueueUrl: queueUrl,
-          MessageBody: JSON.stringify({
+        const result = await launchCampaign(
+          pool,
+          {
             campaignId: row.campaignId,
             workspaceId: row.workspaceId,
-          }),
-        }));
+            segmentId: row.segmentId,
+            channel,
+            status: row.status,
+          },
+          async (payload) => {
+            await sqs.send(new SendMessageCommand({ QueueUrl: queueUrl, MessageBody: JSON.stringify(payload) }));
+          },
+        );
 
-        await db.update(campaigns).set({ status: 'sending' }).where(eq(campaigns.campaignId, row.campaignId));
-        row.status = 'sending';
-        row.estimatedCost = estimatedCost;
+        if (!result.ok && result.reason === 'insufficient_funds') {
+          // Campaign reverted to draft — nothing queued, nothing held
+          return respond(402, {
+            message: 'Insufficient credits to send this campaign',
+            campaignId: row.campaignId,
+            required: result.required,
+            available: result.available,
+            recipients: result.recipients,
+          });
+        }
+        if (result.ok) {
+          row.status = 'sending';
+          row.estimatedCost = result.estimatedCost;
+        }
       }
 
       return respond(201, row);

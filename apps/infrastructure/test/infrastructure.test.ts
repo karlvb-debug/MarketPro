@@ -3,6 +3,8 @@ import { Match, Template } from 'aws-cdk-lib/assertions';
 import { DatabaseStack } from '../lib/database-stack';
 import { EmailStack } from '../lib/email-stack';
 import { BillingStack } from '../lib/billing-stack';
+import { AuthStack } from '../lib/auth-stack';
+import { ApiStack } from '../lib/api-stack';
 
 // Skip esbuild asset bundling during synth — these tests assert on the
 // CloudFormation template, not on Lambda bundles.
@@ -198,6 +200,83 @@ describe('BillingStack', () => {
     });
     template.hasResourceProperties('AWS::ApiGateway::Method', {
       HttpMethod: 'POST',
+    });
+  });
+});
+
+describe('DatabaseStack (prod stage)', () => {
+  let template: Template;
+
+  beforeAll(() => {
+    const app = makeApp();
+    const stack = new DatabaseStack(app, 'ProdDatabaseStack', { stage: 'prod' });
+    template = Template.fromStack(stack);
+  });
+
+  test('production RDS is Multi-AZ, encrypted, protected, with 14-day backups', () => {
+    template.hasResourceProperties('AWS::RDS::DBInstance', {
+      MultiAZ: true,
+      StorageEncrypted: true,
+      DeletionProtection: true,
+      BackupRetentionPeriod: 14,
+    });
+    template.hasResource('AWS::RDS::DBInstance', {
+      DeletionPolicy: 'Retain',
+    });
+  });
+
+  test('stage-suffixed physical names avoid collisions with dev', () => {
+    template.hasResourceProperties('AWS::SNS::Topic', {
+      TopicName: 'marketing-saas-ops-alerts-prod',
+    });
+    template.hasResourceProperties('AWS::SecretsManager::Secret', {
+      Name: 'marketing-saas/rds-credentials-prod',
+    });
+  });
+});
+
+describe('ApiStack', () => {
+  let template: Template;
+
+  beforeAll(() => {
+    const app = makeApp();
+    const db = new DatabaseStack(app, 'TestDatabaseStack');
+    const auth = new AuthStack(app, 'TestAuthStack');
+    const stack = new ApiStack(app, 'TestApiStack', {
+      vpc: db.vpc,
+      lambdaSecurityGroup: db.lambdaSecurityGroup,
+      database: db.database,
+      dbSecret: db.dbSecret,
+      userPool: auth.userPool,
+      userPoolClient: auth.userPoolClient,
+      opsAlertsTopic: db.opsAlertsTopic,
+    });
+    template = Template.fromStack(stack);
+  });
+
+  test('WAF web ACL with rate limit + managed rules is associated with the API stage', () => {
+    template.resourceCountIs('AWS::WAFv2::WebACL', 1);
+    template.resourceCountIs('AWS::WAFv2::WebACLAssociation', 1);
+    template.hasResourceProperties('AWS::WAFv2::WebACL', {
+      Rules: Match.arrayWith([
+        Match.objectLike({ Name: 'RateLimitPerIp' }),
+        Match.objectLike({ Name: 'AWSManagedCommonRuleSet' }),
+      ]),
+    });
+  });
+
+  test('migrations run automatically on deploy via Trigger', () => {
+    template.resourceCountIs('Custom::Trigger', 1);
+  });
+
+  test('scheduled dispatch poller fires every 5 minutes and is alarmed', () => {
+    template.hasResourceProperties('AWS::Events::Rule', {
+      ScheduleExpression: 'rate(5 minutes)',
+      State: 'ENABLED',
+    });
+    template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+      MetricName: 'Errors',
+      Namespace: 'AWS/Lambda',
     });
   });
 });

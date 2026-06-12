@@ -3,7 +3,7 @@
 // locally: postgresql://marketpro:marketpro@localhost:5432/marketpro_test).
 
 import { Pool } from 'pg';
-import { SCHEMA_SQL } from '../lambda/db-migrate';
+import { runMigrations } from '../lambda/lib/migrate';
 import {
   authorizeCampaignFunds,
   getChannelPrice,
@@ -21,7 +21,7 @@ describeDb('billing ledger (Postgres integration)', () => {
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: TEST_DATABASE_URL, max: 5 });
-    await pool.query(SCHEMA_SQL); // the real migration, idempotent
+    await runMigrations(pool); // the real migration path
   });
 
   afterAll(async () => {

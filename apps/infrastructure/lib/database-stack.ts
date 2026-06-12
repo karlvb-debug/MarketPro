@@ -6,6 +6,11 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as sns from 'aws-cdk-lib/aws-sns';
 
+export interface DatabaseStackProps extends cdk.StackProps {
+  /** Deployment stage: 'dev' (default) | 'staging' | 'prod'. */
+  stage?: string;
+}
+
 export class DatabaseStack extends cdk.Stack {
   public readonly vpc: ec2.Vpc;
   public readonly database: rds.DatabaseInstance;
@@ -14,13 +19,19 @@ export class DatabaseStack extends cdk.Stack {
   public readonly lambdaSecurityGroup: ec2.SecurityGroup;
   public readonly opsAlertsTopic: sns.Topic;
 
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+  constructor(scope: Construct, id: string, props?: DatabaseStackProps) {
     super(scope, id, props);
+
+    const stage = props?.stage ?? 'dev';
+    const isProd = stage === 'prod';
+    // 'dev' keeps legacy physical names so the existing deployment is not
+    // replaced; other stages get suffixed names to coexist in one account.
+    const named = (base: string) => (stage === 'dev' ? base : `${base}-${stage}`);
 
     // Central ops alerting topic — CloudWatch alarms across all stacks
     // publish here. Subscribe an email/PagerDuty endpoint out-of-band.
     this.opsAlertsTopic = new sns.Topic(this, 'OpsAlertsTopic', {
-      topicName: 'marketing-saas-ops-alerts',
+      topicName: named('marketing-saas-ops-alerts'),
       displayName: 'MarketPro operational alarms',
     });
 
@@ -35,7 +46,8 @@ export class DatabaseStack extends cdk.Stack {
       partitionKey: { name: 'Message_ID', type: dynamodb.AttributeType.STRING },
       timeToLiveAttribute: 'ttl',
       billing: dynamodb.Billing.onDemand(),
-      removalPolicy: cdk.RemovalPolicy.DESTROY, // For dev purposes only
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+      pointInTimeRecoverySpecification: isProd ? { pointInTimeRecoveryEnabled: true } : undefined,
     });
 
     // Create a Security Group for Lambda functions that need RDS access
@@ -68,17 +80,30 @@ export class DatabaseStack extends cdk.Stack {
         subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
       },
       securityGroups: [rdsSecurityGroup],
-      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MICRO), // Cost effective for base
+      instanceType: isProd
+        ? ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MEDIUM)
+        : ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MICRO),
       allocatedStorage: 20,
       maxAllocatedStorage: 100, // Autoscaling
-      multiAz: false, // For dev, set to true for production
+      multiAz: isProd,
       publiclyAccessible: false,
       databaseName: 'marketingsaas',
       credentials: rds.Credentials.fromGeneratedSecret('marketingsaas_admin', {
-        secretName: 'marketing-saas/rds-credentials',
+        secretName: named('marketing-saas/rds-credentials'),
       }),
-      removalPolicy: cdk.RemovalPolicy.DESTROY, // For dev purposes only
+      backupRetention: isProd ? cdk.Duration.days(14) : cdk.Duration.days(1),
+      deletionProtection: isProd,
+      // Encryption forces instance replacement, so it is enabled for new
+      // (staging/prod) instances but left off for the existing dev one.
+      storageEncrypted: stage !== 'dev',
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
+
+    // NOTE concurrency ceiling: Lambdas connect directly to RDS (no RDS
+    // Proxy — unavailable on this account tier) with max:1 pools, so the
+    // hard limit is Postgres max_connections (~100 on t3.micro/medium
+    // minus headroom). Throttle Lambda reserved concurrency or add RDS
+    // Proxy before exceeding ~80 concurrent DB-touching invocations.
 
     // Store reference to the auto-generated secret
     this.dbSecret = this.database.secret!;

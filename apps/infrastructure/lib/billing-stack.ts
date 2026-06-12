@@ -25,6 +25,8 @@ export interface BillingStackProps extends cdk.StackProps {
   dbSecret: secretsmanager.ISecret;
   idempotencyTable: dynamodb.TableV2;
   opsAlertsTopic: sns.ITopic;
+  /** Deployment stage: 'dev' (default) | 'staging' | 'prod'. */
+  stage?: string;
 }
 
 export class BillingStack extends cdk.Stack {
@@ -34,10 +36,14 @@ export class BillingStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: BillingStackProps) {
     super(scope, id, props);
 
+    const stage = props.stage ?? 'dev';
+    // 'dev' keeps legacy physical names; other stages suffix to coexist.
+    const named = (base: string) => (stage === 'dev' ? base : `${base}-${stage}`);
+
     // 1. The Canonical Event Bus (SNS)
     // All events (SES deliver, SMS reply, Connect trace) hit here.
     this.canonicalEventBus = new sns.Topic(this, 'CanonicalEventBus', {
-      topicName: 'marketing-saas-canonical-events',
+      topicName: named('marketing-saas-canonical-events'),
       displayName: 'Canonical Router for all outbound events',
     });
 
@@ -45,13 +51,13 @@ export class BillingStack extends cdk.Stack {
     // Using Standard (not FIFO) because Standard SNS Topics cannot subscribe to FIFO queues.
     // Deduplication is handled by the DynamoDB idempotency store in the billing Lambda.
     const billingDlq = new sqs.Queue(this, 'BillingDLQ', {
-      queueName: 'marketing-saas-billing-dlq',
+      queueName: named('marketing-saas-billing-dlq'),
       retentionPeriod: cdk.Duration.days(14),
     });
 
     // 3. The Billing SQS Queue (Standard — idempotency store handles dedup)
     this.billingQueue = new sqs.Queue(this, 'BillingQueue', {
-      queueName: 'marketing-saas-billing-queue',
+      queueName: named('marketing-saas-billing-queue'),
       visibilityTimeout: cdk.Duration.seconds(30),
       deadLetterQueue: {
         queue: billingDlq,
@@ -138,9 +144,9 @@ export class BillingStack extends cdk.Stack {
     // Stripe secrets live in Secrets Manager (created out-of-band, referenced by name).
     // The Lambda receives the ARNs and resolves the values at runtime.
     const stripeSecret = secretsmanager.Secret.fromSecretNameV2(
-      this, 'StripeSecret', 'marketing-saas/stripe-secret');
+      this, 'StripeSecret', named('marketing-saas/stripe-secret'));
     const stripeWebhookSecret = secretsmanager.Secret.fromSecretNameV2(
-      this, 'StripeWebhookSecret', 'marketing-saas/stripe-webhook-secret');
+      this, 'StripeWebhookSecret', named('marketing-saas/stripe-webhook-secret'));
 
     const stripeWebhookLambda = new lambdaNodejs.NodejsFunction(this, 'StripeWebhookFunction', {
       runtime: lambda.Runtime.NODEJS_20_X,

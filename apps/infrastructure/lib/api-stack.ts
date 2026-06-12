@@ -9,6 +9,13 @@ import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as sns from 'aws-cdk-lib/aws-sns';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as eventsTargets from 'aws-cdk-lib/aws-events-targets';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
+import * as cloudwatchActions from 'aws-cdk-lib/aws-cloudwatch-actions';
+import * as triggers from 'aws-cdk-lib/triggers';
+import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import * as path from 'path';
 
 export interface ApiStackProps extends cdk.StackProps {
@@ -23,6 +30,7 @@ export interface ApiStackProps extends cdk.StackProps {
   voiceDispatchQueue?: sqs.IQueue;
   uploadBucket?: s3.IBucket;
   frontendUrl?: string;
+  opsAlertsTopic?: sns.ITopic;
 }
 
 export class ApiStack extends cdk.Stack {
@@ -89,16 +97,25 @@ export class ApiStack extends cdk.Stack {
     });
 
     // ============================================
-    // DB Migration Lambda (one-shot, manually invoked)
+    // DB Migration Lambda — versioned runner (database/migrations/)
+    // Invoked automatically on every deploy via Trigger; safe to re-run.
     // ============================================
     const migrateLambda = new lambdaNodejs.NodejsFunction(this, 'DbMigrateFunction', {
       ...commonLambdaProps,
       entry: path.join(__dirname, '../lambda/db-migrate.ts'),
       handler: 'handler',
-      timeout: cdk.Duration.seconds(60),
+      timeout: cdk.Duration.seconds(120),
       memorySize: 512,
     });
     props.dbSecret.grantRead(migrateLambda);
+
+    // Run pending migrations on every deploy (re-fires when the Lambda
+    // code — i.e. the migration set — changes).
+    new triggers.Trigger(this, 'RunMigrationsOnDeploy', {
+      handler: migrateLambda,
+      invocationType: triggers.InvocationType.REQUEST_RESPONSE,
+      timeout: cdk.Duration.minutes(3),
+    });
 
     // ============================================
     // CRUD Lambdas
@@ -316,6 +333,110 @@ export class ApiStack extends cdk.Stack {
     const batchResource = this.api.root.addResource('batch');
     const batchIntegration = new apigateway.LambdaIntegration(batchLambda);
     batchResource.addMethod('GET', batchIntegration, securedMethodOptions);
+
+    // ============================================
+    // Scheduled dispatch poller — launches campaigns whose scheduled_at
+    // has come due (claim → authorization hold → SQS), every 5 minutes.
+    // ============================================
+    const scheduledDispatchLambda = new lambdaNodejs.NodejsFunction(this, 'ScheduledDispatchFunction', {
+      ...commonLambdaProps,
+      entry: path.join(__dirname, '../lambda/scheduled-dispatch.ts'),
+      handler: 'handler',
+      timeout: cdk.Duration.seconds(120),
+      environment: {
+        ...commonLambdaProps.environment,
+        EMAIL_DISPATCH_QUEUE_URL: props.emailDispatchQueue?.queueUrl || '',
+        SMS_DISPATCH_QUEUE_URL: props.smsDispatchQueue?.queueUrl || '',
+        VOICE_DISPATCH_QUEUE_URL: props.voiceDispatchQueue?.queueUrl || '',
+      },
+    });
+    props.dbSecret.grantRead(scheduledDispatchLambda);
+    props.emailDispatchQueue?.grantSendMessages(scheduledDispatchLambda);
+    props.smsDispatchQueue?.grantSendMessages(scheduledDispatchLambda);
+    props.voiceDispatchQueue?.grantSendMessages(scheduledDispatchLambda);
+
+    new events.Rule(this, 'ScheduledDispatchRule', {
+      description: 'Launch campaigns whose scheduled send time has arrived',
+      schedule: events.Schedule.rate(cdk.Duration.minutes(5)),
+      targets: [new eventsTargets.LambdaFunction(scheduledDispatchLambda, { retryAttempts: 2 })],
+    });
+
+    if (props.opsAlertsTopic) {
+      const pollerAlarm = new cloudwatch.Alarm(this, 'ScheduledDispatchErrorsAlarm', {
+        alarmDescription: 'Scheduled campaign dispatch poller is failing — due campaigns are not launching.',
+        metric: scheduledDispatchLambda.metricErrors({ period: cdk.Duration.minutes(15), statistic: 'Sum' }),
+        threshold: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+      pollerAlarm.addAlarmAction(new cloudwatchActions.SnsAction(props.opsAlertsTopic));
+    }
+
+    // ============================================
+    // WAF — managed protections + per-IP rate limit on the public API
+    // ============================================
+    const webAcl = new wafv2.CfnWebACL(this, 'ApiWebAcl', {
+      scope: 'REGIONAL',
+      defaultAction: { allow: {} },
+      visibilityConfig: {
+        cloudWatchMetricsEnabled: true,
+        metricName: 'MarketingSaaSApiWaf',
+        sampledRequestsEnabled: true,
+      },
+      rules: [
+        {
+          name: 'RateLimitPerIp',
+          priority: 0,
+          action: { block: {} },
+          statement: {
+            rateBasedStatement: { aggregateKeyType: 'IP', limit: 2000 }, // per 5 min
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'RateLimitPerIp',
+            sampledRequestsEnabled: true,
+          },
+        },
+        {
+          name: 'AWSManagedCommonRuleSet',
+          priority: 1,
+          overrideAction: { none: {} },
+          statement: {
+            managedRuleGroupStatement: {
+              vendorName: 'AWS',
+              name: 'AWSManagedRulesCommonRuleSet',
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'CommonRuleSet',
+            sampledRequestsEnabled: true,
+          },
+        },
+        {
+          name: 'AWSManagedKnownBadInputs',
+          priority: 2,
+          overrideAction: { none: {} },
+          statement: {
+            managedRuleGroupStatement: {
+              vendorName: 'AWS',
+              name: 'AWSManagedRulesKnownBadInputsRuleSet',
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'KnownBadInputs',
+            sampledRequestsEnabled: true,
+          },
+        },
+      ],
+    });
+
+    new wafv2.CfnWebACLAssociation(this, 'ApiWebAclAssociation', {
+      resourceArn: this.api.deploymentStage.stageArn,
+      webAclArn: webAcl.attrArn,
+    });
 
     // ============================================
     // Outputs

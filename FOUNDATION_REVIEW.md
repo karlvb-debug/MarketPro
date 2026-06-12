@@ -133,13 +133,13 @@ Phase-by-phase reality vs. the claims in `TODO.md` / `architecture_plan.md`:
 - [x] Playwright smoke suite (`apps/frontend/e2e/`): rendering + hydration of all routes, sidebar navigation, settings, import-wizard dialog open/Escape-close, error-boundary canary. Runs as a dedicated CI job (browsers unavailable in the dev sandbox — network policy blocks the Playwright CDN; selectors grounded against the served app).
 - [x] Accessibility baseline: dialog semantics + focus management + Escape on Modal, auto-associated form labels via `useId`, `th scope`, toast `aria-live`, `aria-current` nav, aria-labels on every icon-only control.
 
-### Milestone 5 — Operational readiness (≈2 weeks)
+### Milestone 5 — Operational readiness (≈2 weeks) — ✅ DONE (June 12, 2026)
 
-- [ ] Versioned migrations (drizzle-kit migrations or Flyway) replacing the imperative `db-migrate.ts`; run automatically on deploy.
-- [ ] RDS: enable Multi-AZ + automated snapshots for production; add RDS Proxy (or document the concurrency ceiling without it).
-- [ ] Staging environment + CD: GitHub Actions → `cdk deploy` to staging on merge, manual promotion to prod.
-- [ ] WAF on API Gateway; scope the over-broad IAM grants (e.g. `ses:SendEmail` on `*` → identity-scoped).
-- [ ] EventBridge scheduled sends (currently immediate-only despite UI accepting a schedule).
+- [x] Versioned migrations: `database/migrations/` registry + transactional, advisory-locked, `schema_migrations`-tracked runner; applied automatically on every deploy via CDK Trigger; current schema captured as idempotent `0001-baseline`. Integration tests prove apply/re-run/concurrency.
+- [x] Stage-aware infra (`--context stage=dev|staging|prod`): prod RDS gets Multi-AZ, storage encryption, deletion protection, 14-day backups, RETAIN policies, t3.medium; PITR on the idempotency table. Stage-suffixed physical names let stages coexist in one account ('dev' keeps legacy names — no replacement). RDS Proxy still out (account tier); concurrency ceiling documented in `database-stack.ts` (~80 concurrent DB Lambdas on max_connections ≈ 100).
+- [x] Staging + CD: `.github/workflows/deploy.yml` — staging auto-deploys on merge to main via GitHub OIDC; prod is `workflow_dispatch` behind the `production` environment approval gate.
+- [x] WAF on API Gateway: per-IP rate limit (2000/5min) + AWS managed Common & KnownBadInputs rule sets; SES IAM grant scoped from `*` to account identities/configuration-sets.
+- [x] Scheduled sends: campaigns with future `scheduled_at` are stored as `scheduled` and launched by a 5-minute EventBridge poller through a shared `launchCampaign` path (claim → authorization hold → queue) used by the API too; insufficient funds parks the campaign as `paused`; queue failures revert the claim for retry. Race-proven by integration tests (4 concurrent launchers → exactly 1 send).
 
 ### Milestone 6 — Finish the claimed feature set (≈4–6 weeks, prioritize by go-to-market)
 

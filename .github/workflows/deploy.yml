@@ -1,0 +1,85 @@
+name: Deploy
+
+# Staging deploys automatically on every push to main (after CI passes).
+# Production requires manual approval via the 'production' GitHub
+# environment (configure required reviewers in repo settings).
+#
+# Prerequisites (one-time, in repo settings):
+# - Secret AWS_DEPLOY_ROLE_ARN: IAM role assumable via GitHub OIDC with
+#   CDK deploy permissions (and the account CDK-bootstrapped).
+# - Environments 'staging' and 'production' (the latter with required
+#   reviewers for the manual gate).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Stage to deploy
+        type: choice
+        options: [staging, prod]
+        default: staging
+
+permissions:
+  id-token: write # GitHub OIDC -> AWS
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.event.inputs.stage || 'staging' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging:
+    name: Deploy staging
+    if: github.event_name == 'push' || github.event.inputs.stage == 'staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: CDK deploy (staging)
+        working-directory: apps/infrastructure
+        run: npx cdk deploy --all --context stage=staging --require-approval never
+
+  deploy-prod:
+    name: Deploy production
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.stage == 'prod'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production # manual approval gate lives here
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: CDK deploy (prod)
+        working-directory: apps/infrastructure
+        run: npx cdk deploy --all --context stage=prod --require-approval never

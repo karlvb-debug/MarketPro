@@ -12,6 +12,14 @@ import { AnalyticsStack } from '../lib/analytics-stack';
 
 const app = new cdk.App();
 
+// Deployment stage: dev (default) | staging | prod.
+// Pass with `cdk deploy --all --context stage=staging`.
+// 'dev' keeps the legacy unsuffixed stack/resource names so the existing
+// deployment is untouched; other stages are fully namespaced and can
+// coexist in the same account.
+const stage: string = app.node.tryGetContext('stage') || process.env.STAGE || 'dev';
+const stackId = (base: string) => (stage === 'dev' ? base : `${base}-${stage}`);
+
 // Define a common environment if necessary
 const env = { 
   account: process.env.CDK_DEFAULT_ACCOUNT, 
@@ -19,13 +27,13 @@ const env = {
 };
 
 // 1. Provision the Database Stack (RDS, RDS Proxy, DynamoDB, VPC)
-const databaseStack = new DatabaseStack(app, 'MarketingSaaSDatabaseStack', { env });
+const databaseStack = new DatabaseStack(app, stackId('MarketingSaaSDatabaseStack'), { env, stage });
 
 // 2. Provision the Auth Stack (Cognito User & Identity Pools)
-const authStack = new AuthStack(app, 'MarketingSaaSAuthStack', { env });
+const authStack = new AuthStack(app, stackId('MarketingSaaSAuthStack'), { env });
 
 // 3. Provision the Email Stack (SES Identities & IP Pools + Dispatch Engine)
-const emailStack = new EmailStack(app, 'MarketingSaaSEmailStack', {
+const emailStack = new EmailStack(app, stackId('MarketingSaaSEmailStack'), {
   env,
   vpc: databaseStack.vpc,
   lambdaSecurityGroup: databaseStack.lambdaSecurityGroup,
@@ -36,8 +44,9 @@ const emailStack = new EmailStack(app, 'MarketingSaaSEmailStack', {
 emailStack.addDependency(databaseStack);
 
 // 4. Provision the SMS Stack (AWS End User Messaging, TCPA Compliance)
-const smsStack = new SmsStack(app, 'MarketingSaaSSmsStack', {
+const smsStack = new SmsStack(app, stackId('MarketingSaaSSmsStack'), {
   env,
+  stage,
   vpc: databaseStack.vpc,
   lambdaSecurityGroup: databaseStack.lambdaSecurityGroup,
   database: databaseStack.database,
@@ -47,7 +56,7 @@ const smsStack = new SmsStack(app, 'MarketingSaaSSmsStack', {
 smsStack.addDependency(databaseStack);
 
 // 5. Provision the Voice Stack (Amazon Connect Pooled Dialer, AMD flows)
-const voiceStack = new VoiceStack(app, 'MarketingSaaSVoiceStack', {
+const voiceStack = new VoiceStack(app, stackId('MarketingSaaSVoiceStack'), {
   env,
   vpc: databaseStack.vpc,
   lambdaSecurityGroup: databaseStack.lambdaSecurityGroup,
@@ -58,7 +67,7 @@ const voiceStack = new VoiceStack(app, 'MarketingSaaSVoiceStack', {
 voiceStack.addDependency(databaseStack);
 
 // 6. Provision the Contact Ingestion Stack (S3, Step Functions)
-const contactIngestionStack = new ContactIngestionStack(app, 'MarketingSaaSContactIngestionStack', {
+const contactIngestionStack = new ContactIngestionStack(app, stackId('MarketingSaaSContactIngestionStack'), {
   env,
   vpc: databaseStack.vpc,
   lambdaSecurityGroup: databaseStack.lambdaSecurityGroup,
@@ -70,7 +79,7 @@ contactIngestionStack.addDependency(databaseStack);
 
 // 7. Provision the API Stack (API Gateway, Authorizers)
 // Now receives all cross-stack dependencies it needs to function
-const apiStack = new ApiStack(app, 'MarketingSaaSApiStack', {
+const apiStack = new ApiStack(app, stackId('MarketingSaaSApiStack'), {
   env,
   vpc: databaseStack.vpc,
   lambdaSecurityGroup: databaseStack.lambdaSecurityGroup,
@@ -82,6 +91,7 @@ const apiStack = new ApiStack(app, 'MarketingSaaSApiStack', {
   smsDispatchQueue: smsStack.smsDispatchQueue,
   voiceDispatchQueue: voiceStack.voiceDispatchQueue,
   uploadBucket: contactIngestionStack.uploadBucket,
+  opsAlertsTopic: databaseStack.opsAlertsTopic,
   // frontendUrl: 'https://app.yourdomain.com', // Set this for production
 });
 
@@ -93,7 +103,7 @@ apiStack.addDependency(voiceStack);
 apiStack.addDependency(contactIngestionStack);
 
 // 8. Provision the Billing Stack (SNS Canonical, SQS, Stripe Webhooks, Idempotency)
-const billingStack = new BillingStack(app, 'MarketingSaaSBillingStack', {
+const billingStack = new BillingStack(app, stackId('MarketingSaaSBillingStack'), {
   env,
   vpc: databaseStack.vpc,
   lambdaSecurityGroup: databaseStack.lambdaSecurityGroup,
@@ -101,12 +111,13 @@ const billingStack = new BillingStack(app, 'MarketingSaaSBillingStack', {
   dbSecret: databaseStack.dbSecret,
   idempotencyTable: databaseStack.idempotencyTable,
   opsAlertsTopic: databaseStack.opsAlertsTopic,
+  stage,
 });
 
 billingStack.addDependency(databaseStack);
 
 // 9. Provision the Analytics Stack (Athena Data Lake & Right to be Forgotten)
-const analyticsStack = new AnalyticsStack(app, 'MarketingSaaSAnalyticsStack', {
+const analyticsStack = new AnalyticsStack(app, stackId('MarketingSaaSAnalyticsStack'), {
   env,
   vpc: databaseStack.vpc,
   lambdaSecurityGroup: databaseStack.lambdaSecurityGroup,
