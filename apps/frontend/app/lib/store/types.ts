@@ -193,12 +193,37 @@ export function templateRecordId(t: AnyTemplate): string {
 export interface CustomField {
   fieldId: string;
   name: string;        // Display label
-  key: string;         // Slug for data storage
-  type: 'text' | 'number' | 'date' | 'email' | 'phone' | 'url' | 'select';
+  key: string;         // Slug for data storage (immutable after creation)
+  type: 'text' | 'number' | 'date' | 'email' | 'phone' | 'url' | 'select'; // immutable after creation
   isUnique: boolean;   // Treat as unique identifier (like CRM ID)
   required: boolean;
   options?: string[];  // For 'select' type
+  /** Archived definitions are kept (contact rows may carry values) but hidden from pickers */
+  archived?: boolean;
+  sortOrder?: number;
   createdAt: string;
+}
+
+// ============================================
+// Contact filter rules — mirrors lambda/lib/rules.ts (POST /contacts/search)
+// ============================================
+
+export type RuleOp =
+  | 'eq' | 'neq'
+  | 'contains' | 'starts_with' | 'ends_with'
+  | 'is_set' | 'not_set'
+  | 'gt' | 'gte' | 'lt' | 'lte' | 'between' | 'within_days'
+  | 'in' | 'not_in';
+
+export interface RuleCondition {
+  field: string;
+  op: RuleOp;
+  value?: unknown;
+}
+
+export interface RuleGroup {
+  combinator: 'and' | 'or';
+  conditions: (RuleCondition | RuleGroup)[];
 }
 
 export interface WorkspaceSettings {
@@ -315,6 +340,19 @@ export interface RawContactRow {
   customFields?: Record<string, string>; custom_fields?: Record<string, string>;
   createdAt?: string; created_at?: string;
   updatedAt?: string; updated_at?: string;
+}
+
+export interface RawCustomFieldRow {
+  fieldId?: string; field_id?: string;
+  name?: string;
+  key?: string;
+  type?: CustomField['type'];
+  required?: boolean;
+  isUnique?: boolean; is_unique?: boolean;
+  options?: string[] | null;
+  archived?: boolean;
+  sortOrder?: number; sort_order?: number;
+  createdAt?: string; created_at?: string;
 }
 
 export interface BatchLoadResponse {

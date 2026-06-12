@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import { useStore, Contact } from '../lib/store';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useStore, Contact, CustomField, Segment, RuleCondition, RuleGroup, RuleOp } from '../lib/store';
 import Toolbar from '../components/Toolbar';
 import DataTable from '../components/DataTable';
 import { Button, EmptyState, Modal, Field, Input, Select, Checkbox, FormActions, showToast } from '../components/ui';
@@ -10,6 +10,135 @@ import ContactCard from '../components/ContactCard';
 import SegmentPanel from '../components/SegmentPanel';
 import ImportWizard from '../components/ImportWizard';
 import { validatePhone } from '../lib/contact-utils';
+
+// ---- FILTER CHIPS ----
+interface ActiveFilter {
+  id: string;
+  field: string;
+  operator: 'contains' | 'equals' | 'starts_with' | 'is_empty' | 'is_not_empty';
+  value: string;
+}
+
+// Chip operator → rule-engine op (POST /contacts/search):
+//   contains → contains, equals → eq, starts_with → starts_with,
+//   is_empty → not_set, is_not_empty → is_set
+const BASE_OP: Record<ActiveFilter['operator'], RuleOp> = {
+  contains: 'contains',
+  equals: 'eq',
+  starts_with: 'starts_with',
+  is_empty: 'not_set',
+  is_not_empty: 'is_set',
+};
+
+// Chip field key → server rule field
+const CORE_FIELD_MAP: Record<string, string> = {
+  firstName: 'first_name',
+  lastName: 'last_name',
+  email: 'email',
+  phone: 'phone',
+  company: 'company',
+  timezone: 'timezone',
+  source: 'source',
+};
+
+/**
+ * Convert the active filter chips to a server rules tree. Ops are adjusted
+ * per field type so every emitted condition is valid for the backend's
+ * OPS_BY_TYPE matrix (lambda/lib/rules.ts). Incomplete chips (value-ops with
+ * an empty value) and inexpressible combos are skipped. Returns null when
+ * nothing is filterable — callers then use the plain GET list path.
+ */
+function buildRulesFromFilters(
+  filters: ActiveFilter[],
+  segments: Segment[],
+  customFields: CustomField[],
+): RuleGroup | null {
+  const conditions: (RuleCondition | RuleGroup)[] = [];
+
+  for (const f of filters) {
+    const needsValue = f.operator !== 'is_empty' && f.operator !== 'is_not_empty';
+    const value = f.value.trim();
+    if (needsValue && !value) continue; // chip not filled in yet
+
+    // Segment membership — in_segment / not_in_segment pseudo-fields (value = segment uuid)
+    if (f.field === 'segments') {
+      if (f.operator === 'is_empty') {
+        if (segments.length > 0) {
+          conditions.push({
+            combinator: 'and',
+            conditions: segments.map((s) => ({ field: 'not_in_segment', op: 'eq' as const, value: s.segmentId })),
+          });
+        }
+      } else if (f.operator === 'is_not_empty') {
+        if (segments.length > 0) {
+          conditions.push({
+            combinator: 'or',
+            conditions: segments.map((s) => ({ field: 'in_segment', op: 'eq' as const, value: s.segmentId })),
+          });
+        }
+      } else {
+        const seg = segments.find((s) => s.name === value);
+        if (seg) conditions.push({ field: 'in_segment', op: 'eq', value: seg.segmentId });
+      }
+      continue;
+    }
+
+    // Status — server enum is active|unsubscribed|bounced|complained; the
+    // UI's 'suppressed'/'dnc' views map onto those values. is_set/not_set
+    // are invalid for enums, so emptiness chips are skipped.
+    if (f.field === 'status') {
+      if (!needsValue) continue;
+      if (value === 'suppressed') {
+        conditions.push({ field: 'status', op: 'in', value: ['unsubscribed', 'bounced', 'complained'] });
+      } else if (value === 'dnc') {
+        conditions.push({ field: 'status', op: 'eq', value: 'unsubscribed' });
+      } else {
+        conditions.push({ field: 'status', op: 'eq', value });
+      }
+      continue;
+    }
+
+    // Custom fields — custom.<key>, ops clamped to the definition's type
+    if (f.field.startsWith('custom:')) {
+      const key = f.field.slice('custom:'.length);
+      const def = customFields.find((cf) => cf.key === key && !cf.archived);
+      if (!def) continue;
+      const field = `custom.${key}`;
+      const op = BASE_OP[f.operator];
+      if (op === 'is_set' || op === 'not_set') {
+        conditions.push({ field, op });
+      } else if (def.type === 'number') {
+        // contains/starts_with are invalid for numbers → exact match
+        if (Number.isFinite(Number(value))) conditions.push({ field, op: 'eq', value: Number(value) });
+      } else if (def.type === 'date') {
+        // dates only support range ops → exact match expressed as between
+        if (!Number.isNaN(Date.parse(value))) conditions.push({ field, op: 'between', value: [value, value] });
+      } else if (def.type === 'select') {
+        // contains/starts_with are invalid for selects → exact match
+        conditions.push({ field, op: 'eq', value });
+      } else if (def.type === 'url' && op === 'starts_with') {
+        // starts_with is invalid for urls → contains
+        conditions.push({ field, op: 'contains', value });
+      } else {
+        conditions.push({ field, op, value });
+      }
+      continue;
+    }
+
+    // Core text fields — contains/eq/starts_with/is_set/not_set are all valid
+    const field = CORE_FIELD_MAP[f.field];
+    if (!field) continue;
+    const op = BASE_OP[f.operator];
+    if (op === 'is_set' || op === 'not_set') {
+      conditions.push({ field, op });
+    } else {
+      conditions.push({ field, op, value });
+    }
+  }
+
+  if (conditions.length === 0) return null;
+  return { combinator: 'and', conditions };
+}
 
 export default function ContactsPage() {
   const {
@@ -32,12 +161,6 @@ export default function ContactsPage() {
   const [bulkEditData, setBulkEditData] = useState({ company: '', state: '', timezone: '' });
 
   // ---- FILTERS ----
-  interface ActiveFilter {
-    id: string;
-    field: string;
-    operator: 'contains' | 'equals' | 'starts_with' | 'is_empty' | 'is_not_empty';
-    value: string;
-  }
   const [filters, setFilters] = useState<ActiveFilter[]>([]);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
 
@@ -130,7 +253,7 @@ export default function ContactsPage() {
       { key: 'status', label: 'Status', type: 'select' as const, options: ['active', 'suppressed', 'dnc'] },
       { key: 'segments', label: 'Segment', type: 'select' as const, options: segments.map((s) => s.name) },
     ];
-    const custom = (settings.customFields || []).map((cf) => ({
+    const custom = (settings.customFields || []).filter((cf) => !cf.archived).map((cf) => ({
       key: `custom:${cf.key}`,
       label: cf.name,
       type: cf.type === 'select' ? 'select' as const : 'text' as const,
@@ -151,16 +274,28 @@ export default function ContactsPage() {
 
   const activeSegment = activeSegmentId ? segments.find((s) => s.segmentId === activeSegmentId) || null : null;
 
-  // Synchronize local search/segment/filters to store
+  // Refs so the filter-sync effect can read segments/custom fields without
+  // depending on them — both get a fresh array identity every render.
+  const segmentsRef = useRef(segments);
+  segmentsRef.current = segments;
+  const customFieldsRef = useRef(settings.customFields);
+  customFieldsRef.current = settings.customFields;
+
+  // Synchronize local search/segment/filters to store. Active filter chips
+  // are compiled to a rules tree and served by POST /contacts/search; with
+  // no usable chips the store falls back to the plain GET list path.
   useEffect(() => {
-    // Extract status filter from advanced filters if it exists
+    const rules = buildRulesFromFilters(filters, segmentsRef.current, customFieldsRef.current || []);
+
+    // Legacy GET path fallback: extract a status filter for the list endpoint
     const statusFilter = filters.find((f) => f.field === 'status');
-    const status = statusFilter && statusFilter.operator === 'equals' ? statusFilter.value : '';
+    const status = !rules && statusFilter && statusFilter.operator === 'equals' ? statusFilter.value : '';
 
     setContactsFilter({
       search,
       segmentId: activeSegmentId,
       status,
+      rules,
     });
   }, [search, activeSegmentId, filters, setContactsFilter]);
 
@@ -280,7 +415,9 @@ export default function ContactsPage() {
   );
 
   const viewTitle = activeSegment ? activeSegment.name : 'All Contacts';
-  const viewCount = displayContacts.length;
+  // Server-side total for the current filters (rules/search/segment) — the
+  // loaded page may be shorter when paginating.
+  const viewCount = contactsMeta.total || displayContacts.length;
 
   return (
     <>
@@ -654,6 +791,7 @@ export default function ContactsPage() {
         onClose={() => setShowImportModal(false)}
         activeSegmentName={activeSegment?.name}
         activeSegmentId={activeSegment?.segmentId}
+        customFields={settings.customFields}
         importContacts={importContacts}
         refreshContacts={refreshContacts}
       />

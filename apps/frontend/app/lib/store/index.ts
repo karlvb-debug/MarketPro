@@ -102,7 +102,7 @@ export function useStore() {
     if (!wsHydrated) return;
     setHydrated(false);
     setLoadError(false);
-    setContactsFilter({ search: '', segmentId: null, status: '' });
+    setContactsFilter({ search: '', segmentId: null, status: '', rules: null });
     loadFromApi().then((apiData) => {
       setData(apiData ?? getEmptyData());
       setHydrated(true);

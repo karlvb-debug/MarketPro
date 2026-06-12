@@ -101,21 +101,30 @@ export default function SettingsPage() {
   const dncOverdue = dncScrubAge !== null && dncScrubAge > 31;
   const hasBusinessAddress = store.settings.businessAddress.trim().length > 0;
 
-  const handleAddField = () => {
+  const handleAddField = async () => {
     if (!newField.name.trim()) return;
     const key = newField.key.trim() || newField.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-    store.addCustomField({
-      name: newField.name.trim(),
+    const options = newField.type === 'select' ? newField.options.split(',').map((o) => o.trim()).filter(Boolean) : undefined;
+    if (newField.type === 'select' && (!options || options.length === 0)) {
+      showToast('Dropdown fields need at least one option', 'error');
+      return;
+    }
+    const name = newField.name.trim();
+    setNewField({ name: '', key: '', type: 'text', isUnique: false, required: false, options: '' });
+    setShowAddField(false);
+    // Optimistic — addCustomField rolls back and toasts on failure (e.g. 409 duplicate key)
+    const error = await store.addCustomField({
+      name,
       key,
       type: newField.type,
       isUnique: newField.isUnique,
       required: newField.required,
-      options: newField.type === 'select' ? newField.options.split(',').map((o) => o.trim()).filter(Boolean) : undefined,
+      options,
     });
-    showToast(`Custom field "${newField.name}" added`);
-    setNewField({ name: '', key: '', type: 'text', isUnique: false, required: false, options: '' });
-    setShowAddField(false);
+    if (!error) showToast(`Custom field "${name}" added`);
   };
+
+  const visibleCustomFields = store.settings.customFields.filter((f) => !f.archived);
 
   return (
     <>
@@ -329,7 +338,7 @@ export default function SettingsPage() {
               </div>
 
               {/* Custom fields */}
-              {store.settings.customFields.map((field) => (
+              {visibleCustomFields.map((field) => (
                 <div key={field.fieldId} className="settings-field-row">
                   <div className="settings-field-info">
                     <span className="settings-field-name">{field.name}</span>
@@ -347,9 +356,9 @@ export default function SettingsPage() {
                       variant="ghost" size="sm"
                       title={`Toggle unique identifier for ${field.name}`}
                       aria-label={`Toggle unique identifier for ${field.name}`}
-                      onClick={() => {
-                        store.updateCustomField(field.fieldId, { isUnique: !field.isUnique });
-                        showToast(`${field.name} ${!field.isUnique ? 'marked as unique' : 'no longer unique'}`);
+                      onClick={async () => {
+                        const error = await store.updateCustomField(field.fieldId, { isUnique: !field.isUnique });
+                        if (!error) showToast(`${field.name} ${!field.isUnique ? 'marked as unique' : 'no longer unique'}`);
                       }}
                       style={{ color: field.isUnique ? 'var(--accent-primary)' : 'var(--text-tertiary)' }}
                     >
@@ -357,9 +366,24 @@ export default function SettingsPage() {
                     </Button>
                     <Button
                       variant="ghost" size="sm"
-                      title={`Delete ${field.name}`}
-                      aria-label={`Delete ${field.name}`}
-                      onClick={() => { store.deleteCustomField(field.fieldId); showToast(`Field "${field.name}" removed`); }}
+                      title={`Toggle required for ${field.name}`}
+                      aria-label={`Toggle required for ${field.name}`}
+                      onClick={async () => {
+                        const error = await store.updateCustomField(field.fieldId, { required: !field.required });
+                        if (!error) showToast(`${field.name} is ${!field.required ? 'now required' : 'no longer required'}`);
+                      }}
+                      style={{ color: field.required ? 'var(--accent-primary)' : 'var(--text-tertiary)' }}
+                    >
+                      ✱
+                    </Button>
+                    <Button
+                      variant="ghost" size="sm"
+                      title={`Archive ${field.name}`}
+                      aria-label={`Archive ${field.name}`}
+                      onClick={async () => {
+                        const error = await store.deleteCustomField(field.fieldId);
+                        if (!error) showToast(`Field "${field.name}" archived — stored values are kept`);
+                      }}
                     >
                       ✕
                     </Button>
@@ -367,7 +391,7 @@ export default function SettingsPage() {
                 </div>
               ))}
 
-              {store.settings.customFields.length === 0 && (
+              {visibleCustomFields.length === 0 && (
                 <div className="settings-field-empty">
                   <p className="text-tertiary text-sm">No custom fields defined yet. Click &quot;+ Add Field&quot; to create one.</p>
                 </div>

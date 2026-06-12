@@ -46,6 +46,9 @@ export const SYSTEM_FIELDS = [
 
 export type SystemFieldKey = typeof SYSTEM_FIELDS[number]['key'];
 
+/** Import mapping target: a system field, or a custom field as `custom:<key>` */
+export type ImportFieldKey = SystemFieldKey | `custom:${string}`;
+
 export interface ImportIssue {
   field: string;
   type: 'fixed' | 'warning' | 'error';
@@ -62,6 +65,7 @@ export interface ProcessedContact {
   company: string;
   state: string;
   timezone: string;
+  customFields?: Record<string, string>;
   issues: ImportIssue[];
   skippedReason?: string;
 }
@@ -174,16 +178,23 @@ function validateEmail(email: string): boolean {
 
 export function processImportRow(
   values: string[],
-  mapping: Record<string, SystemFieldKey | ''>,
+  mapping: Record<string, ImportFieldKey | ''>,
 ): ProcessedContact | null {
   const issues: ImportIssue[] = [];
   const result: Record<string, string> = { firstName: '', lastName: '', email: '', phone: '', company: '', state: '', timezone: '' };
+  const customFields: Record<string, string> = {};
 
   const headers = Object.keys(mapping);
   for (let i = 0; i < headers.length; i++) {
     const header = headers[i]!;
     const fieldKey = mapping[header];
-    if (fieldKey && values[i]) result[fieldKey] = values[i]!.trim();
+    if (!fieldKey || !values[i]) continue;
+    if (fieldKey.startsWith('custom:')) {
+      const key = fieldKey.slice('custom:'.length);
+      if (key) customFields[key] = values[i]!.trim();
+    } else {
+      result[fieldKey] = values[i]!.trim();
+    }
   }
 
   if (!result.email && !result.phone && !result.firstName && !result.lastName) return null;
@@ -221,5 +232,15 @@ export function processImportRow(
   // Skip entirely if no identifier AND no name (nothing useful to store)
   if (!result.email && !result.phone && !result.firstName && !result.lastName) return null;
 
-  return { firstName: result.firstName || '', lastName: result.lastName || '', email: result.email || '', phone: result.phone || '', company: result.company || '', state: result.state || '', timezone: result.timezone || '', issues };
+  return {
+    firstName: result.firstName || '',
+    lastName: result.lastName || '',
+    email: result.email || '',
+    phone: result.phone || '',
+    company: result.company || '',
+    state: result.state || '',
+    timezone: result.timezone || '',
+    customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
+    issues,
+  };
 }

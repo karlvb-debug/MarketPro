@@ -13,6 +13,8 @@ import type {
   Contact,
   ContactsListResponse,
   RawContactRow,
+  RuleCondition,
+  RuleGroup,
   SetStoreData,
   StoreData,
   SuppressionReason,
@@ -24,24 +26,59 @@ interface ContactsSliceDeps {
   setData: SetStoreData;
 }
 
+export interface ContactsFilter {
+  search: string;
+  segmentId: string | null;
+  status: string;
+  /** Rule tree built from the contacts page filter chips — when set, the
+   *  list is served by POST /contacts/search instead of GET /contacts. */
+  rules?: RuleGroup | null;
+}
+
 export function useContactsSlice({ data, setData }: ContactsSliceDeps) {
   // Pagination states
   const [contactsMeta, setContactsMeta] = useState({ total: 0, pageSize: 50, nextCursor: null as string | null, hasMore: false });
   const [contactsLoading, setContactsLoading] = useState(false);
-  const [contactsFilter, setContactsFilter] = useState({ search: '', segmentId: null as string | null, status: '' });
+  const [contactsFilter, setContactsFilter] = useState<ContactsFilter>({ search: '', segmentId: null, status: '', rules: null });
 
   // loadContacts definition
   const loadContacts = useCallback(async (reset: boolean = false) => {
     setContactsLoading(true);
     try {
       const cursor = reset ? undefined : contactsMeta.nextCursor;
-      const res = await api.contacts.list({
-        pageSize: contactsMeta.pageSize,
-        cursor: cursor || undefined,
-        search: contactsFilter.search || undefined,
-        status: contactsFilter.status || undefined,
-        segmentId: contactsFilter.segmentId || undefined,
-      }) as ContactsListResponse | null;
+      let res: ContactsListResponse | null;
+
+      if (contactsFilter.rules) {
+        // Server-side rule filtering — fold search text and the active
+        // segment into the rule tree so all constraints apply together.
+        const conditions: (RuleCondition | RuleGroup)[] = [contactsFilter.rules];
+        if (contactsFilter.search) {
+          conditions.push({
+            combinator: 'or',
+            conditions: ['email', 'first_name', 'last_name', 'company'].map((field) => ({
+              field,
+              op: 'contains' as const,
+              value: contactsFilter.search,
+            })),
+          });
+        }
+        if (contactsFilter.segmentId) {
+          conditions.push({ field: 'in_segment', op: 'eq', value: contactsFilter.segmentId });
+        }
+        res = await api.contacts.search({
+          rules: { combinator: 'and', conditions },
+          cursor: cursor || undefined,
+          pageSize: contactsMeta.pageSize,
+        }) as ContactsListResponse | null;
+      } else {
+        res = await api.contacts.list({
+          pageSize: contactsMeta.pageSize,
+          cursor: cursor || undefined,
+          search: contactsFilter.search || undefined,
+          status: contactsFilter.status || undefined,
+          segmentId: contactsFilter.segmentId || undefined,
+        }) as ContactsListResponse | null;
+      }
 
       if (res && res.data) {
         const rawContacts = res.data || [];
@@ -152,8 +189,21 @@ export function useContactsSlice({ data, setData }: ContactsSliceDeps) {
       return null;
     } catch (err) {
       console.error('[API] Create contact failed:', err);
-      // API failures throw ApiError-shaped objects, not Error instances
-      return (err as Partial<ApiError> | null)?.message || 'Failed to create contact. Please try again.';
+      // API failures throw ApiError-shaped objects, not Error instances.
+      // POST /contacts surfaces typed custom-field problems:
+      // 400 → { fieldErrors, missingRequired }, 409 → { fields }
+      const apiErr = err as Partial<ApiError> | null;
+      let message = apiErr?.message || 'Failed to create contact. Please try again.';
+      if (apiErr?.fieldErrors && Object.keys(apiErr.fieldErrors).length > 0) {
+        message += ` ${Object.entries(apiErr.fieldErrors).map(([key, msg]) => `${key}: ${msg}`).join('; ')}.`;
+      }
+      if (apiErr?.missingRequired && apiErr.missingRequired.length > 0) {
+        message += ` Missing required field${apiErr.missingRequired.length > 1 ? 's' : ''}: ${apiErr.missingRequired.join(', ')}.`;
+      }
+      if (apiErr?.fields && apiErr.fields.length > 0) {
+        message += ` Value${apiErr.fields.length > 1 ? 's' : ''} already in use: ${apiErr.fields.join(', ')}.`;
+      }
+      return message;
     }
   }, [data.contacts, data.segments, setData]);
 
@@ -397,6 +447,9 @@ export function useContactsSlice({ data, setData }: ContactsSliceDeps) {
             company: c.company?.trim() || existing.company || '',
             timezone: c.timezone?.trim() || existing.timezone || '',
             segments: [...new Set([...(existing.segments || []), ...(c.segments || [])])],
+            customFields: (existing.customFields || c.customFields)
+              ? { ...existing.customFields, ...c.customFields }
+              : undefined,
           };
           updatedContacts[matchIdx] = merged;
           // Collect for API payload

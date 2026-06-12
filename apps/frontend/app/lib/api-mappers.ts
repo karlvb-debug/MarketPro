@@ -273,6 +273,22 @@ export function mapApiSegment(row: ApiSegment): Segment {
   };
 }
 
+/** Map a custom field definition row (camelCase or snake_case) → frontend CustomField */
+export function mapApiCustomField(row: import('./store/types').RawCustomFieldRow): CustomField {
+  return {
+    fieldId: row.fieldId || row.field_id || crypto.randomUUID(),
+    name: row.name || '',
+    key: row.key || '',
+    type: row.type || 'text',
+    required: !!row.required,
+    isUnique: !!(row.isUnique ?? row.is_unique),
+    options: Array.isArray(row.options) ? row.options : undefined,
+    archived: !!row.archived,
+    sortOrder: row.sortOrder ?? row.sort_order ?? 0,
+    createdAt: row.createdAt || row.created_at || new Date().toISOString(),
+  };
+}
+
 /** Map a DB settings row → frontend WorkspaceSettings */
 export function mapApiSettings(row: ApiSettings, customFields: CustomField[] = []): WorkspaceSettings {
   return {

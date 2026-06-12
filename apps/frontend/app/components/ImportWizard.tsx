@@ -10,11 +10,11 @@ import {
   guessColumnMapping,
   processImportRow,
   SYSTEM_FIELDS,
-  SystemFieldKey,
+  ImportFieldKey,
   ProcessedContact,
   isBlankRow,
 } from '../lib/contact-utils';
-import type { Contact } from '../lib/store';
+import type { Contact, CustomField } from '../lib/store';
 import { api } from '../lib/api-client';
 
 // ============================================
@@ -27,6 +27,8 @@ interface ImportWizardProps {
   onClose: () => void;
   activeSegmentName?: string;
   activeSegmentId?: string;
+  /** Workspace custom field definitions — archived fields are excluded from mapping */
+  customFields?: CustomField[];
   importContacts: (
     contacts: Omit<Contact, 'contactId' | 'createdAt' | 'compliance'>[]
   ) => Promise<{ added: number; updated: number; skipped: number; blankSkipped?: number; serverError?: string | null }>;
@@ -49,9 +51,17 @@ export default function ImportWizard({
   onClose,
   activeSegmentName,
   activeSegmentId,
+  customFields,
   importContacts,
   refreshContacts,
 }: ImportWizardProps) {
+  // Mapping targets: system fields + non-archived custom field definitions
+  const importTargets = useMemo(() => [
+    ...SYSTEM_FIELDS.map((f) => ({ key: f.key as ImportFieldKey, label: f.label, icon: f.icon })),
+    ...(customFields || [])
+      .filter((cf) => !cf.archived)
+      .map((cf) => ({ key: `custom:${cf.key}` as ImportFieldKey, label: `Custom: ${cf.name}`, icon: '✦' })),
+  ], [customFields]);
   // Step state
   const [step, setStep] = useState<ImportStep>('upload');
   const [result, setResult] = useState<{ added: number; updated: number; skipped: number; blankSkipped: number; noIdSkipped: number; background?: boolean } | null>(null);
@@ -66,8 +76,8 @@ export default function ImportWizard({
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvRows, setCsvRows] = useState<string[][]>([]);
 
-  // Column mapping: csvHeader → systemFieldKey (or '')
-  const [mapping, setMapping] = useState<Record<string, SystemFieldKey | ''>>({});
+  // Column mapping: csvHeader → import target key (or '')
+  const [mapping, setMapping] = useState<Record<string, ImportFieldKey | ''>>({});
 
   // Processed preview data
   const [processedContacts, setProcessedContacts] = useState<ProcessedContact[]>([]);
@@ -123,7 +133,7 @@ export default function ImportWizard({
           setCsvHeaders(headers);
           setCsvRows(rows);
           const autoMapping = guessColumnMapping(headers);
-          setMapping(autoMapping as Record<string, SystemFieldKey | ''>);
+          setMapping(autoMapping as Record<string, ImportFieldKey | ''>);
           setStep('map');
         } catch {
           showToast('Failed to read Excel file. Please try saving as .xlsx and re-uploading.', 'error');
@@ -143,7 +153,7 @@ export default function ImportWizard({
         setCsvHeaders(headers);
         setCsvRows(rows);
         const autoMapping = guessColumnMapping(headers);
-        setMapping(autoMapping as Record<string, SystemFieldKey | ''>);
+        setMapping(autoMapping as Record<string, ImportFieldKey | ''>);
         setStep('map');
       };
       reader.readAsText(file);
@@ -163,7 +173,7 @@ export default function ImportWizard({
   };
 
   // ---- Step 2: Map Columns ----
-  const handleMappingChange = (csvHeader: string, fieldKey: SystemFieldKey | '') => {
+  const handleMappingChange = (csvHeader: string, fieldKey: ImportFieldKey | '') => {
     setMapping((prev) => {
       const next = { ...prev };
       // If the field was already assigned to another header, unset it
@@ -298,6 +308,7 @@ export default function ImportWizard({
       company: c.company,
       state: c.state,
       timezone: c.timezone,
+      customFields: c.customFields,
       segments: activeSegmentName ? [activeSegmentName] : ([] as string[]),
       source: 'csv_import',
       consentSource: (consentSource || 'unknown') as Contact['consentSource'],
@@ -492,7 +503,7 @@ export default function ImportWizard({
                   </div>
                 </div>
                 <span className="import-map-badge">
-                  {mappedFieldCount} of {SYSTEM_FIELDS.length} mapped
+                  {mappedFieldCount} of {importTargets.length} mapped
                 </span>
               </div>
 
@@ -504,7 +515,7 @@ export default function ImportWizard({
                   <div className="import-mapping-cell import-mapping-label import-mapping-preview-col">Preview</div>
                 </div>
 
-                {SYSTEM_FIELDS.map((field) => {
+                {importTargets.map((field) => {
                   const assignedHeader = Object.entries(mapping).find(
                     ([, v]) => v === field.key
                   )?.[0];

@@ -120,6 +120,9 @@ async function apiFetch<T>(
           status: res.status,
           message: errorBody.message || `Request failed with status ${res.status}`,
           code: errorBody.code,
+          fieldErrors: errorBody.fieldErrors,
+          missingRequired: errorBody.missingRequired,
+          fields: errorBody.fields,
         } as ApiError;
       }
 
@@ -203,6 +206,18 @@ export const api = {
     bulkDelete: (ids: string[]) => apiClient.delete<{ deleted: number }>('/contacts', { ids }),
     import: (contacts: unknown[], segmentId?: string) => apiClient.post<{ added: number; updated: number; skipped: number }>('/contacts/import', { contacts, segmentId }),
     getImportUrl: (segmentId?: string) => apiClient.get<{ url: string; key: string }>(`/contacts/import-url${segmentId ? `?segmentId=${segmentId}` : ''}`),
+    /** Server-side rule filtering — rules is a { combinator, conditions } tree */
+    search: (body: { rules?: unknown; cursor?: string | null; pageSize?: number }) =>
+      apiClient.post<ApiResponse<unknown[]>>('/contacts/search', body),
+  },
+
+  // Custom field definitions
+  customFields: {
+    list: () => apiClient.get<ApiResponse<unknown[]>>('/custom-fields'),
+    create: (data: unknown) => apiClient.post<unknown>('/custom-fields', data),
+    update: (id: string, data: unknown) => apiClient.put<unknown>(`/custom-fields/${id}`, data),
+    /** DELETE archives — definitions are never destroyed */
+    archive: (id: string) => apiClient.delete<{ archived: boolean; fieldId: string }>(`/custom-fields/${id}`),
   },
 
   // Segments
@@ -265,12 +280,6 @@ export const api = {
   settings: {
     get: () => apiClient.get<unknown>('/settings'),
     update: (data: unknown) => apiClient.put<unknown>('/settings', data),
-    customFields: {
-      list: () => apiClient.get<ApiResponse<unknown[]>>('/settings/custom-fields'),
-      create: (data: unknown) => apiClient.post<unknown>('/settings/custom-fields', data),
-      update: (id: string, data: unknown) => apiClient.put<unknown>(`/settings/custom-fields/${id}`, data),
-      delete: (id: string) => apiClient.delete(`/settings/custom-fields/${id}`),
-    },
   },
 
   // Analytics

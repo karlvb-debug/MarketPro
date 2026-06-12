@@ -3,10 +3,13 @@
 // ============================================
 
 import { api } from '../api-client';
+import { mapApiCustomField } from '../api-mappers';
 import type {
   BatchLoadResponse,
   Campaign,
+  CustomField,
   EmailTemplate,
+  RawCustomFieldRow,
   Segment,
   SmsTemplate,
   StoreData,
@@ -16,9 +19,19 @@ import { getDefaultSettings } from './seed';
 
 export async function loadFromApi(): Promise<StoreData | null> {
   try {
-    // Single API call — loads all workspace data from one Lambda
-    const res = await api.batch.load() as BatchLoadResponse | null;
+    // Batch call loads all workspace data from one Lambda; custom field
+    // definitions live behind their own endpoint, fetched in parallel.
+    const [res, customFieldsRes] = await Promise.all([
+      api.batch.load() as Promise<BatchLoadResponse | null>,
+      api.customFields.list().catch((err) => {
+        console.error('loadFromApi custom fields error:', err);
+        return null;
+      }),
+    ]);
     if (!res) return null;
+
+    const customFields: CustomField[] = ((customFieldsRes?.data || []) as RawCustomFieldRow[])
+      .map(mapApiCustomField);
 
     const rawSegments = res.segments || [];
     const segments: Segment[] = rawSegments.map((row) => ({
@@ -86,7 +99,7 @@ export async function loadFromApi(): Promise<StoreData | null> {
       templates: { email: emailTemplates, sms: smsTemplates, voice: voiceScripts, webform: [] },
       templateFolders: [],
       inbox: [],
-      settings: getDefaultSettings(),
+      settings: { ...getDefaultSettings(), customFields },
     };
   } catch (err) {
     console.error('loadFromApi error:', err);
