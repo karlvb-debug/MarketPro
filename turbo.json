@@ -35,5 +35,8 @@
       ],
       "outputs": []
     }
-  }
+  },
+  "globalEnv": [
+    "CI"
+  ]
 }

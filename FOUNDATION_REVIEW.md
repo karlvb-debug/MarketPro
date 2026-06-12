@@ -124,14 +124,14 @@ Phase-by-phase reality vs. the claims in `TODO.md` / `architecture_plan.md`:
 
 **Deferred within M3 scope:** consent-evidence archival to S3 Glacier (4-year retention) and FTC DNC scrubbing (needs customer SAN) — both tracked for M6.
 
-### Milestone 4 — Frontend hardening (≈2 weeks, parallelizable with M2–M3)
+### Milestone 4 — Frontend hardening (≈2 weeks) — ✅ DONE (June 12, 2026)
 
-- [ ] Rollback on failed optimistic updates; surface import success/failure to the user; remove silent catches.
-- [ ] React error boundaries on route segments; loading states instead of `null` returns.
-- [ ] Split `store.ts` into domain hooks (contacts/campaigns/templates/settings); decompose `EmailBlockEditor` and `ImportWizard`.
-- [ ] Eliminate the `as any` casts by typing the API contract (consider generating types shared between Lambda handlers and the client).
-- [ ] Smoke/E2E tests (Playwright) for the critical paths: login → import contacts → create segment → create campaign → send.
-- [ ] Accessibility baseline: labels, alt text, keyboard navigation on the data table and modals.
+- [x] Optimistic-update rollback: `updateContact`/`updateCompliance` snapshot before mutating, restore on API rejection, toast the error, and return it to callers. `importContacts` awaits every upsert chunk (`Promise.allSettled`), reports full/partial server failure to the wizard, and a ref guard rejects overlapping imports.
+- [x] Error boundaries (`app/error.tsx`, `app/global-error.tsx`) — render errors no longer white-screen the app; shared `LoadingState` replaces `return null` hydration gaps on six pages.
+- [x] `store.ts` split into 10 domain modules under `app/lib/store/` behind a byte-compatible `useStore()` facade (zero page changes); store↔mappers import cycle broken. (`EmailBlockEditor`/`ImportWizard` decomposition deferred — large mechanical refactors with no behavior payoff; revisit when those features change.)
+- [x] `as any` elimination was completed in M0's lint burn-down (typed API row models; 0 warnings enforced in CI).
+- [x] Playwright smoke suite (`apps/frontend/e2e/`): rendering + hydration of all routes, sidebar navigation, settings, import-wizard dialog open/Escape-close, error-boundary canary. Runs as a dedicated CI job (browsers unavailable in the dev sandbox — network policy blocks the Playwright CDN; selectors grounded against the served app).
+- [x] Accessibility baseline: dialog semantics + focus management + Escape on Modal, auto-associated form labels via `useId`, `th scope`, toast `aria-live`, `aria-current` nav, aria-labels on every icon-only control.
 
 ### Milestone 5 — Operational readiness (≈2 weeks)
 

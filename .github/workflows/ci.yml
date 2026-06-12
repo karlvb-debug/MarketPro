@@ -52,3 +52,28 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  e2e:
+    name: Frontend smoke tests (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Build frontend
+        run: npx turbo run build --filter=frontend
+
+      - name: Run smoke tests
+        working-directory: apps/frontend
+        run: npm run test:e2e
