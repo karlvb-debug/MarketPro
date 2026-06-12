@@ -195,6 +195,14 @@ export class ApiStack extends cdk.Stack {
     });
     props.dbSecret.grantRead(forgetLambda);
 
+    // Custom field definitions (contacts module C1)
+    const customFieldsLambda = new lambdaNodejs.NodejsFunction(this, 'CustomFieldsFunction', {
+      ...commonLambdaProps,
+      entry: path.join(__dirname, '../lambda/api/custom-fields.ts'),
+      handler: 'handler',
+    });
+    props.dbSecret.grantRead(customFieldsLambda);
+
     const batchLambda = new lambdaNodejs.NodejsFunction(this, 'BatchFunction', {
       ...commonLambdaProps,
       entry: path.join(__dirname, '../lambda/api/batch.ts'),
@@ -277,6 +285,10 @@ export class ApiStack extends cdk.Stack {
     const contactsImportResource = contactsResource.addResource('import');
     contactsImportResource.addMethod('POST', contactsIntegration, securedMethodOptions);
 
+    // /contacts/search — server-side rule filtering
+    const contactsSearchResource = contactsResource.addResource('search');
+    contactsSearchResource.addMethod('POST', contactsIntegration, securedMethodOptions);
+
     // /contacts/import-url — generate presigned s3 upload URL
     const contactsImportUrlResource = contactsResource.addResource('import-url');
     contactsImportUrlResource.addMethod('GET', contactsIntegration, securedMethodOptions);
@@ -328,6 +340,15 @@ export class ApiStack extends cdk.Stack {
     templateIdResource.addMethod('GET', templatesIntegration, securedMethodOptions);
     templateIdResource.addMethod('PUT', templatesIntegration, securedMethodOptions);
     templateIdResource.addMethod('DELETE', templatesIntegration, securedMethodOptions);
+
+    // ---- /custom-fields ----
+    const customFieldsResource = this.api.root.addResource('custom-fields');
+    const customFieldsIntegration = new apigateway.LambdaIntegration(customFieldsLambda);
+    customFieldsResource.addMethod('GET', customFieldsIntegration, securedMethodOptions);
+    customFieldsResource.addMethod('POST', customFieldsIntegration, securedMethodOptions);
+    const customFieldIdResource = customFieldsResource.addResource('{id}');
+    customFieldIdResource.addMethod('PUT', customFieldsIntegration, securedMethodOptions);
+    customFieldIdResource.addMethod('DELETE', customFieldsIntegration, securedMethodOptions);
 
     // ---- /batch (single call for all workspace data) ----
     const batchResource = this.api.root.addResource('batch');

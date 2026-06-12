@@ -11,7 +11,9 @@ import { eq, ne, and, or, ilike, sql, inArray } from 'drizzle-orm';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { normalizeContactRow } from '../lib/contact-validate';
-import { getDb, respond, getWorkspaceId, getUserId, requireRole, isSuperAdmin, methodToAction } from '../lib/db';
+import { loadFieldDefinitions, validateCustomFields, findUniqueViolations } from '../lib/custom-fields';
+import { parseRules, compileRules, RuleValidationError } from '../lib/rules';
+import { getDb, getPool, respond, getWorkspaceId, getUserId, requireRole, isSuperAdmin, methodToAction } from '../lib/db';
 import { contacts, adminAuditLog, segments, contactSegment, suppressionList } from '../../drizzle/schema';
 import * as crypto from 'crypto';
 
@@ -228,6 +230,57 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return respond(200, row);
     }
 
+    // POST /contacts/search — server-side rule filtering (same shape as
+    // GET /contacts, but rules can be arbitrarily large JSON). Compiled by
+    // the whitelisting rule engine — see lambda/lib/rules.ts.
+    if (method === 'POST' && event.path?.endsWith('/search')) {
+      const body = JSON.parse(event.body || '{}');
+      const pageSize = Math.min(100, parseInt(String(body.pageSize || '50'), 10) || 50);
+      const cursor = typeof body.cursor === 'string' ? body.cursor : null;
+
+      const pool = await getPool();
+      let ruleSql = '';
+      let ruleParams: unknown[] = [];
+      if (body.rules) {
+        try {
+          const defs = (await loadFieldDefinitions(pool, workspaceId)).filter((d) => !d.archived);
+          // $1 = workspaceId, $2 = cursor placeholder budget handled below
+          const compiled = compileRules(parseRules(body.rules), defs, 2);
+          ruleSql = ` AND ${compiled.text}`;
+          ruleParams = compiled.params;
+        } catch (err) {
+          if (err instanceof RuleValidationError) {
+            return respond(400, { message: `Invalid rules: ${err.message}` });
+          }
+          throw err;
+        }
+      }
+
+      const rows = await pool.query(
+        `SELECT c.* FROM contacts c
+          WHERE c.workspace_id = $1
+            AND ($2::uuid IS NULL OR c.contact_id > $2)${ruleSql}
+          ORDER BY c.contact_id
+          LIMIT ${pageSize + 1}`,
+        [workspaceId, cursor, ...ruleParams],
+      );
+
+      const hasMore = rows.rows.length > pageSize;
+      const data = hasMore ? rows.rows.slice(0, pageSize) : rows.rows;
+      const nextCursor = hasMore ? data[data.length - 1]?.contact_id : null;
+
+      const count = await pool.query(
+        `SELECT COUNT(*)::int AS total FROM contacts c
+          WHERE c.workspace_id = $1 AND ($2::uuid IS NULL OR TRUE)${ruleSql}`,
+        [workspaceId, null, ...ruleParams],
+      );
+
+      return respond(200, {
+        data,
+        meta: { total: count.rows[0].total, pageSize, nextCursor, hasMore },
+      });
+    }
+
     // POST /contacts/import — bulk upsert (up to 1,000 per request)
     // Requires editor role or higher
     // Two-pass strategy to handle both email-based and phone-only contacts
@@ -254,9 +307,19 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
           consentSource: c.consent_source || c.consentSource || null,
         };
       };
+      // Lenient typed validation for bulk import: invalid custom-field
+      // values are dropped (the row still imports); strict 400s would make
+      // large CSV imports unusable.
+      const fieldDefs = await loadFieldDefinitions(await getPool(), workspaceId);
+      let droppedFieldValues = 0;
       const normalized = rawRows
         .map((c) => toValues(c))
-        .filter((c): c is NonNullable<ReturnType<typeof toValues>> => c !== null);
+        .filter((c): c is NonNullable<ReturnType<typeof toValues>> => c !== null)
+        .map((c) => {
+          const validation = validateCustomFields(fieldDefs, c.customFields, { forCreate: false });
+          droppedFieldValues += Object.keys(validation.errors).length;
+          return { ...c, customFields: validation.values };
+        });
 
       // Split into: contacts with email vs phone-only vs invalid
       const withEmail = normalized.filter((c) => c.email);
@@ -331,7 +394,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return importedCount;
       });
 
-      return respond(200, { imported, rejected });
+      return respond(200, { imported, rejected, droppedFieldValues });
     }
 
     // POST /contacts — single upsert
@@ -355,6 +418,25 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         consentSource: body.consent_source || body.consentSource || null,
         customFields: body.custom_fields || body.customFields || {},
       };
+
+      // Typed custom-field validation (strict: API callers get a 400)
+      {
+        const pool = await getPool();
+        const defs = await loadFieldDefinitions(pool, workspaceId);
+        const validation = validateCustomFields(defs, values.customFields, { forCreate: true });
+        if (Object.keys(validation.errors).length > 0 || validation.missingRequired.length > 0) {
+          return respond(400, {
+            message: 'Custom field validation failed',
+            fieldErrors: validation.errors,
+            missingRequired: validation.missingRequired,
+          });
+        }
+        const violations = await findUniqueViolations(pool, workspaceId, defs, validation.values);
+        if (violations.length > 0) {
+          return respond(409, { message: 'Unique custom field values already in use', fields: violations });
+        }
+        values.customFields = validation.values;
+      }
 
       // 1. Check if email or phone already exists in this workspace
       let existingContact: any = null;

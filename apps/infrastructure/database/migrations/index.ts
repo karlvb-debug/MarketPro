@@ -10,6 +10,7 @@
 // ============================================
 
 import * as baseline from './0001-baseline';
+import * as customFields from './0002-custom-fields-and-filter-indexes';
 
 export interface Migration {
   id: string;
@@ -18,4 +19,5 @@ export interface Migration {
 
 export const MIGRATIONS: Migration[] = [
   { id: baseline.id, sql: baseline.sql },
+  { id: customFields.id, sql: customFields.sql },
 ];

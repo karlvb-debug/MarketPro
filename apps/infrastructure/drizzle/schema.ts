@@ -445,6 +445,8 @@ export const customFieldDefinitions = pgTable('custom_field_definitions', {
   isUnique: boolean('is_unique').default(false),
   required: boolean('required').default(false),
   options: jsonb('options'),                                // For 'select' type: string[]
+  archived: boolean('archived').notNull().default(false),   // Lifecycle: archive, never destructive-delete
+  sortOrder: integer('sort_order').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (table) => ({
   workspaceIdx: index('custom_field_defs_workspace_idx').on(table.workspaceId),
