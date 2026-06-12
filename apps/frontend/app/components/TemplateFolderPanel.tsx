@@ -72,7 +72,7 @@ export default function TemplateFolderPanel({ activeFolderId, activeType, onSele
           <span className="sp-folder-name">{folder.name}</span>
           <span className="sp-item-count">{count}</span>
           <div className="sp-item-actions" onClick={(e) => e.stopPropagation()}>
-            <button className="sp-action-btn" title="Delete folder" onClick={async () => {
+            <button className="sp-action-btn" title="Delete folder" aria-label={`Delete folder ${folder.name}`} onClick={async () => {
               const ok = await confirm(`Delete folder "${folder.name}"? Templates inside will become uncategorized.`, { title: 'Delete Folder', variant: 'danger' });
               if (ok) {
                 store.deleteTemplateFolder(folder.folderId);
@@ -92,7 +92,7 @@ export default function TemplateFolderPanel({ activeFolderId, activeType, onSele
       <div className="sp-header">
         <span className="sp-title">FOLDERS</span>
         <div className="sp-header-actions">
-          <button className="sp-header-btn" title="New Folder" onClick={() => setCreatingFolder(true)}>+</button>
+          <button className="sp-header-btn" title="New Folder" aria-label="New folder" onClick={() => setCreatingFolder(true)}>+</button>
         </div>
       </div>
 
@@ -101,6 +101,7 @@ export default function TemplateFolderPanel({ activeFolderId, activeType, onSele
         <input
           className="sp-search-input"
           placeholder="Search folders..."
+          aria-label="Search folders"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />

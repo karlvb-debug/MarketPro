@@ -5,7 +5,7 @@ import { useStore, CustomField } from '../lib/store';
 import { useWorkspace } from '../lib/workspace';
 import PageHeader from '../components/PageHeader';
 import { Card } from '../components/DataTable';
-import { Button, Tabs, Modal, Field, Input, Select, Checkbox, FormActions, showToast } from '../components/ui';
+import { Button, Tabs, Modal, Field, Input, Select, Checkbox, FormActions, LoadingState, showToast } from '../components/ui';
 import { useConfirm } from '../components/ConfirmDialog';
 
 // ============================================
@@ -70,7 +70,7 @@ export default function SettingsPage() {
     { id: 'danger', label: 'Danger Zone', icon: '' },
   ];
 
-  if (!store.hydrated) return null;
+  if (!store.hydrated) return <LoadingState />;
 
   const handleSaveGeneral = () => {
     renameWorkspace(activeWorkspace.workspaceId, wsName);
@@ -346,6 +346,7 @@ export default function SettingsPage() {
                     <Button
                       variant="ghost" size="sm"
                       title={`Toggle unique identifier for ${field.name}`}
+                      aria-label={`Toggle unique identifier for ${field.name}`}
                       onClick={() => {
                         store.updateCustomField(field.fieldId, { isUnique: !field.isUnique });
                         showToast(`${field.name} ${!field.isUnique ? 'marked as unique' : 'no longer unique'}`);
@@ -357,8 +358,8 @@ export default function SettingsPage() {
                     <Button
                       variant="ghost" size="sm"
                       title={`Delete ${field.name}`}
+                      aria-label={`Delete ${field.name}`}
                       onClick={() => { store.deleteCustomField(field.fieldId); showToast(`Field "${field.name}" removed`); }}
-                      
                     >
                       ✕
                     </Button>

@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useStore } from '../lib/store';
 import PageHeader from '../components/PageHeader';
-import { Button, EmptyState, SearchInput } from '../components/ui';
+import { Button, EmptyState, LoadingState, SearchInput } from '../components/ui';
 
 type InboxChannel = 'sms' | 'email' | 'form';
 
@@ -51,7 +51,7 @@ export default function InboxPage() {
     markRead(messageId);
   };
 
-  if (!hydrated) return null;
+  if (!hydrated) return <LoadingState />;
 
   const totalUnread = unreadCounts.sms + unreadCounts.email + unreadCounts.form;
 
@@ -166,7 +166,7 @@ export default function InboxPage() {
               {/* Reply bar — only for SMS and Email */}
               {(selected.channel === 'sms' || selected.channel === 'email') && (
                 <div className="flex gap-3 pt-4 border-t">
-                  <input type="text" className="form-input flex-1" placeholder={selected.channel === 'email' ? 'Type a reply...' : 'Type a reply...'} />
+                  <input type="text" className="form-input flex-1" placeholder="Type a reply..." aria-label="Reply message" />
                   <Button variant="primary">Send</Button>
                 </div>
               )}

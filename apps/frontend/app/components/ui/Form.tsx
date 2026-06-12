@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode } from 'react';
+import { ReactNode, ReactElement, cloneElement, isValidElement, useId } from 'react';
 
 // ============================================
 // Form Primitives — split from FormElements.tsx
@@ -17,12 +17,32 @@ export interface FieldProps {
 }
 
 export function Field({ label, required, children, hint, error }: FieldProps) {
+  const autoId = useId();
+
+  // Associate the label with the wrapped control when the child is a
+  // single form control (native or one of our primitives).
+  let control = children;
+  let htmlFor: string | undefined;
+  if (isValidElement(children)) {
+    const type = children.type;
+    const isFormControl =
+      type === Input ||
+      type === Select ||
+      type === Textarea ||
+      (typeof type === 'string' && ['input', 'select', 'textarea'].includes(type));
+    if (isFormControl) {
+      const child = children as ReactElement<{ id?: string }>;
+      htmlFor = child.props.id ?? autoId;
+      if (!child.props.id) control = cloneElement(child, { id: autoId });
+    }
+  }
+
   return (
     <div className="form-field">
-      <label className="form-label">
+      <label className="form-label" htmlFor={htmlFor}>
         {label} {required && <span className="form-required">*</span>}
       </label>
-      {children}
+      {control}
       {error && <p className="form-error">{error}</p>}
       {!error && hint && <p className="form-hint">{hint}</p>}
     </div>

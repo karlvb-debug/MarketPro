@@ -46,13 +46,14 @@ export default function Sidebar() {
       <aside className={`sidebar ${isOpen ? 'sidebar-open' : ''}`}>
         <WorkspaceSwitcher />
 
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav" aria-label="Main navigation">
           <div className="sidebar-section-label">Main</div>
           {navItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}
               className={`sidebar-link ${pathname === item.href ? 'active' : ''}`}
+              aria-current={pathname === item.href ? 'page' : undefined}
               onClick={close}
             >
               <span className="sidebar-link-icon">{item.icon}</span>
@@ -66,6 +67,7 @@ export default function Sidebar() {
               key={item.href}
               href={item.href}
               className={`sidebar-link ${pathname === item.href ? 'active' : ''}`}
+              aria-current={pathname === item.href ? 'page' : undefined}
               onClick={close}
             >
               <span className="sidebar-link-icon">{item.icon}</span>
@@ -81,6 +83,7 @@ export default function Sidebar() {
           <Link
             href="/settings"
             className={`sidebar-link ${pathname === '/settings' ? 'active' : ''}`}
+            aria-current={pathname === '/settings' ? 'page' : undefined}
             onClick={close}
           >
             <span className="sidebar-link-icon"><IconSettings size={16} /></span>

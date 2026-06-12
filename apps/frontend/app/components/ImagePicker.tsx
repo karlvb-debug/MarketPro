@@ -226,6 +226,7 @@ function ImageLibraryGrid({
                 className="img-lib-delete"
                 onClick={(e) => onDelete(img.id, e)}
                 title="Delete from library"
+                aria-label={`Delete ${img.name} from library`}
               >✕</button>
             </div>
           ))}

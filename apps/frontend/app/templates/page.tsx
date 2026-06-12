@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react';
 import { useStore, templateRecordId, type AnyTemplate } from '../lib/store';
 import Toolbar from '../components/Toolbar';
 import TemplateFolderPanel from '../components/TemplateFolderPanel';
-import { Button, EmptyState, Modal, Field, Input, Textarea, FormActions, showToast } from '../components/ui';
+import { Button, EmptyState, LoadingState, Modal, Field, Input, Textarea, FormActions, showToast } from '../components/ui';
 import { useConfirm } from '../components/ConfirmDialog';
 
 type ContentType = 'email' | 'sms' | 'voice' | 'webform';
@@ -124,7 +124,7 @@ export default function TemplatesPage() {
     }
   };
 
-  if (!hydrated) return null;
+  if (!hydrated) return <LoadingState />;
 
   const typeTabs = [
     { id: 'email', label: `Emails (${templates.email.length})` },
@@ -254,7 +254,7 @@ export default function TemplatesPage() {
                             {activeType === 'email' && (
                               <a href={`/email-builder?templateId=${id}`} className="btn btn-secondary btn-sm">Edit</a>
                             )}
-                            <Button variant="ghost" size="sm" onClick={() => handleDeleteItem(id)}>✕</Button>
+                            <Button variant="ghost" size="sm" aria-label={`Delete ${item.name}`} onClick={() => handleDeleteItem(id)}>✕</Button>
                           </div>
                         </td>
                       </tr>
@@ -271,7 +271,7 @@ export default function TemplatesPage() {
           <div className="tpl-preview-drawer">
             <div className="tpl-preview-header">
               <h3 className="tpl-preview-title">{previewItem.name}</h3>
-              <Button variant="ghost" size="sm" onClick={() => setPreviewId(null)}>✕</Button>
+              <Button variant="ghost" size="sm" aria-label="Close preview" onClick={() => setPreviewId(null)}>✕</Button>
             </div>
             <div className="tpl-preview-body">
               {activeType === 'email' && 'subjectLine' in previewItem && (

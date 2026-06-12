@@ -106,11 +106,13 @@ export default function SegmentPanel({ activeSegmentId, onSelectSegment }: Segme
           <button
             className="sp-action-btn"
             title="Rename"
+            aria-label={`Rename segment ${seg.name}`}
             onClick={() => { setEditingId(seg.segmentId); setEditName(seg.name); }}
           >✎</button>
           <button
             className="sp-action-btn"
             title="Delete"
+            aria-label={`Delete segment ${seg.name}`}
             onClick={async () => {
               const ok = await confirm(`Delete "${seg.name}"? Contacts won't be deleted.`, { title: 'Delete Segment', variant: 'danger' });
               if (ok) {
@@ -147,8 +149,8 @@ export default function SegmentPanel({ activeSegmentId, onSelectSegment }: Segme
       <div className="sp-header">
         <span className="sp-title">SEGMENTS</span>
         <div className="sp-header-actions">
-          <button className="sp-header-btn" title="New Folder" onClick={() => setCreatingFolder(true)}>+</button>
-          <button className="sp-header-btn" title="New Segment" onClick={() => { setCreatingIn(''); setTimeout(() => inputRef.current?.focus(), 50); }}>+</button>
+          <button className="sp-header-btn" title="New Folder" aria-label="New folder" onClick={() => setCreatingFolder(true)}>+</button>
+          <button className="sp-header-btn" title="New Segment" aria-label="New segment" onClick={() => { setCreatingIn(''); setTimeout(() => inputRef.current?.focus(), 50); }}>+</button>
         </div>
       </div>
 
@@ -157,6 +159,7 @@ export default function SegmentPanel({ activeSegmentId, onSelectSegment }: Segme
         <input
           className="sp-search-input"
           placeholder="Search segments..."
+          aria-label="Search segments"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -205,8 +208,8 @@ export default function SegmentPanel({ activeSegmentId, onSelectSegment }: Segme
                 <span className="sp-folder-chevron">{folder.isExpanded ? '▼' : '▶'}</span>
                 <span className="sp-folder-name">{folder.name}</span>
                 <div className="sp-item-actions" onClick={(e) => e.stopPropagation()}>
-                  <button className="sp-action-btn" title="Add segment" onClick={() => { setCreatingIn(folder.name); }}>+</button>
-                  <button className="sp-action-btn" title="Delete folder" onClick={async () => {
+                  <button className="sp-action-btn" title="Add segment" aria-label={`Add segment to ${folder.name}`} onClick={() => { setCreatingIn(folder.name); }}>+</button>
+                  <button className="sp-action-btn" title="Delete folder" aria-label={`Delete folder ${folder.name}`} onClick={async () => {
                     const ok = await confirm(`Delete folder "${folder.name}"? Segments inside will become uncategorized.`, { title: 'Delete Folder', variant: 'danger' });
                     if (ok) {
                       store.deleteSegmentFolder(folder.folderId);

@@ -367,6 +367,7 @@ export default function EmailBlockEditor({ design, onChange, mode = 'email' }: E
                     className="eb-sidebar-preset-delete"
                     onClick={() => handleDeletePreset(preset.id)}
                     title="Delete style"
+                    aria-label="Delete style"
                   >✕</button>
                 </div>
               ))
@@ -491,7 +492,7 @@ export default function EmailBlockEditor({ design, onChange, mode = 'email' }: E
           <>
             <div className="eb-settings-header">
               <h3 className="eb-settings-title">{selectedBlock.type} Settings</h3>
-              <button className="btn btn-ghost btn-sm" onClick={() => setSelectedBlockId(null)}>✕</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setSelectedBlockId(null)} aria-label="Close settings">✕</button>
             </div>
             <div className="eb-settings-body">
               <SettingsPanel
@@ -852,7 +853,7 @@ function SettingsPanelInner({ block, onUpdate }: { block: EmailBlock; onUpdate: 
                 networks[i] = { ...n, url: e.target.value };
                 onUpdate({ networks });
               }} />
-              <button className="btn btn-ghost btn-sm" onClick={() => {
+              <button className="btn btn-ghost btn-sm" aria-label={`Remove ${n.name}`} onClick={() => {
                 const networks = p.networks.filter((_, j) => j !== i);
                 onUpdate({ networks });
               }}>✕</button>
@@ -987,7 +988,7 @@ function SettingsPanelInner({ block, onUpdate }: { block: EmailBlock; onUpdate: 
                 newOpts[i] = e.target.value;
                 onUpdate({ options: newOpts });
               }} style={{ flex: 1 }} />
-              <button className="btn btn-ghost btn-sm" onClick={() => onUpdate({ options: p.options.filter((_, j) => j !== i) })} title="Remove">✕</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => onUpdate({ options: p.options.filter((_, j) => j !== i) })} title="Remove" aria-label={`Remove option ${opt}`}>✕</button>
             </div>
           ))}
           <button className="btn btn-secondary btn-sm" onClick={() => onUpdate({ options: [...p.options, `Option ${p.options.length + 1}`] })}>+ Add Option</button>
@@ -1038,7 +1039,7 @@ function SettingsPanelInner({ block, onUpdate }: { block: EmailBlock; onUpdate: 
                 newOpts[i] = e.target.value;
                 onUpdate({ options: newOpts });
               }} style={{ flex: 1 }} />
-              <button className="btn btn-ghost btn-sm" onClick={() => onUpdate({ options: p.options.filter((_, j) => j !== i) })} title="Remove">✕</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => onUpdate({ options: p.options.filter((_, j) => j !== i) })} title="Remove" aria-label={`Remove option ${opt}`}>✕</button>
             </div>
           ))}
           <button className="btn btn-secondary btn-sm" onClick={() => onUpdate({ options: [...p.options, `Option ${p.options.length + 1}`] })}>+ Add Option</button>

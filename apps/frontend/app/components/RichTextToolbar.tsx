@@ -51,6 +51,7 @@ function Btn({
         onClick();
       }}
       title={title}
+      aria-label={title}
       type="button"
     >
       {children}
@@ -156,6 +157,7 @@ export default function RichTextToolbar({
           onMouseDown={(e) => e.stopPropagation()}
           defaultValue=""
           title="Font"
+          aria-label="Font"
         >
           <option value="" disabled>Font</option>
           {FONT_OPTIONS.map((f) => (
@@ -170,6 +172,7 @@ export default function RichTextToolbar({
           onMouseDown={(e) => e.stopPropagation()}
           defaultValue=""
           title="Size"
+          aria-label="Font size"
         >
           <option value="" disabled>Sz</option>
           {FONT_SIZES.map((s) => (
@@ -188,7 +191,7 @@ export default function RichTextToolbar({
 
         <label className="rtt-clr" title="Text color" onMouseDown={() => { saveSel(); }}>
           <span className="rtt-clr-icon">A</span>
-          <input type="color" className="rtt-clr-input" onChange={(e) => { restoreSel(); exec('foreColor', e.target.value); }} defaultValue="#334155" />
+          <input type="color" className="rtt-clr-input" aria-label="Text color" onChange={(e) => { restoreSel(); exec('foreColor', e.target.value); }} defaultValue="#334155" />
         </label>
 
         <Sep />
@@ -224,10 +227,11 @@ export default function RichTextToolbar({
             onChange={(e) => setLinkUrl(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') applyLink(); if (e.key === 'Escape') setShowLink(false); }}
             placeholder="https://example.com"
+            aria-label="Link URL"
           />
           <button className="rtt-link-btn rtt-link-apply" onMouseDown={(e) => { e.preventDefault(); applyLink(); }} type="button">Apply</button>
           <button className="rtt-link-btn" onMouseDown={(e) => { e.preventDefault(); removeLink(); }} type="button">Unlink</button>
-          <button className="rtt-link-btn" onMouseDown={(e) => { e.preventDefault(); setShowLink(false); }} type="button">✕</button>
+          <button className="rtt-link-btn" onMouseDown={(e) => { e.preventDefault(); setShowLink(false); }} type="button" aria-label="Close link editor">✕</button>
         </div>
       )}
     </>

@@ -366,6 +366,7 @@ export default function ContactsPage() {
                     <span className="filter-chip-label">{fieldDef?.label || f.field}</span>
                     <select
                       className="filter-chip-operator"
+                      aria-label={`Operator for ${fieldDef?.label || f.field} filter`}
                       value={f.operator}
                       onChange={(e) => updateFilter(f.id, { operator: e.target.value as ActiveFilter['operator'] })}
                     >
@@ -377,15 +378,15 @@ export default function ContactsPage() {
                     </select>
                     {f.operator !== 'is_empty' && f.operator !== 'is_not_empty' && (
                       fieldDef?.type === 'select' && fieldDef.options ? (
-                        <select className="filter-chip-value" value={f.value} onChange={(e) => updateFilter(f.id, { value: e.target.value })}>
+                        <select className="filter-chip-value" aria-label={`Value for ${fieldDef?.label || f.field} filter`} value={f.value} onChange={(e) => updateFilter(f.id, { value: e.target.value })}>
                           <option value="">Select...</option>
                           {fieldDef.options.map((opt) => (<option key={opt} value={opt}>{opt}</option>))}
                         </select>
                       ) : (
-                        <input className="filter-chip-value" type="text" placeholder="Value..." value={f.value} onChange={(e) => updateFilter(f.id, { value: e.target.value })} autoFocus />
+                        <input className="filter-chip-value" type="text" placeholder="Value..." aria-label={`Value for ${fieldDef?.label || f.field} filter`} value={f.value} onChange={(e) => updateFilter(f.id, { value: e.target.value })} autoFocus />
                       )
                     )}
-                    <button className="filter-chip-remove" onClick={() => removeFilter(f.id)} title="Remove filter">×</button>
+                    <button className="filter-chip-remove" onClick={() => removeFilter(f.id)} title="Remove filter" aria-label={`Remove ${fieldDef?.label || f.field} filter`}>×</button>
                   </div>
                 );
               })}
@@ -434,7 +435,7 @@ export default function ContactsPage() {
                   {savedViews.map((v) => (
                     <div key={v.id} className={`saved-view-chip ${activeViewId === v.id ? 'saved-view-active' : ''}`}>
                       <button className="saved-view-name" onClick={() => loadView(v)}>{v.name}</button>
-                      <button className="saved-view-delete" onClick={() => deleteView(v.id)} title="Delete view">×</button>
+                      <button className="saved-view-delete" onClick={() => deleteView(v.id)} title="Delete view" aria-label={`Delete view ${v.name}`}>×</button>
                     </div>
                   ))}
                 </div>
@@ -449,6 +450,7 @@ export default function ContactsPage() {
                 className="filter-chip-value"
                 type="text"
                 placeholder="View name..."
+                aria-label="View name"
                 value={newViewName}
                 onChange={(e) => setNewViewName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') saveCurrentView(); if (e.key === 'Escape') setShowSaveViewInput(false); }}
@@ -513,6 +515,7 @@ export default function ContactsPage() {
                     <input
                       type="checkbox"
                       title="Select all"
+                      aria-label="Select all contacts"
                       checked={displayContacts.length > 0 && displayContacts.every((c) => selectedIds.has(c.contactId))}
                       ref={(el) => {
                         if (el) el.indeterminate = selectedIds.size > 0 && !displayContacts.every((c) => selectedIds.has(c.contactId));
@@ -529,7 +532,12 @@ export default function ContactsPage() {
                 {displayContacts.map((c) => (
                   <tr key={c.contactId}>
                     <td style={{ width: '40px' }}>
-                      <input type="checkbox" checked={selectedIds.has(c.contactId)} onChange={() => toggleSelect(c.contactId)} />
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${c.firstName} ${c.lastName}`}
+                        checked={selectedIds.has(c.contactId)}
+                        onChange={() => toggleSelect(c.contactId)}
+                      />
                     </td>
                     <td>
                       <button

@@ -5,7 +5,7 @@ import PageHeader from '../components/PageHeader';
 import StatCard, { StatsGrid } from '../components/StatCard';
 import { MetricBar } from '../components/ProgressBar';
 import DataTable, { Card } from '../components/DataTable';
-import { Button, EmptyState } from '../components/ui';
+import { Button, EmptyState, LoadingState } from '../components/ui';
 
 export default function AnalyticsPage() {
   const { campaigns, hydrated } = useStore();
@@ -19,7 +19,7 @@ export default function AnalyticsPage() {
     bounced: acc.bounced + c.bounced,
   }), { sent: 0, delivered: 0, opened: 0, clicked: 0, bounced: 0 });
 
-  if (!hydrated) return null;
+  if (!hydrated) return <LoadingState />;
 
   return (
     <>

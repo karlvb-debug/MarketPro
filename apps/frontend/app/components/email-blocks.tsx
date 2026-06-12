@@ -96,10 +96,10 @@ export function BlockWrapper({
           }}
           onDragEnd={onDragEnd}
         >⠿</span>
-        {!isFirst && <button className="eb-block-handle-btn" onClick={(e) => { e.stopPropagation(); onMoveUp(); }} title="Move up">↑</button>}
-        {!isLast && <button className="eb-block-handle-btn" onClick={(e) => { e.stopPropagation(); onMoveDown(); }} title="Move down">↓</button>}
-        <button className="eb-block-handle-btn" onClick={(e) => { e.stopPropagation(); onDuplicate(); }} title="Duplicate">⧉</button>
-        <button className="eb-block-handle-btn eb-block-handle-delete" onClick={(e) => { e.stopPropagation(); onDelete(); }} title="Delete">✕</button>
+        {!isFirst && <button className="eb-block-handle-btn" onClick={(e) => { e.stopPropagation(); onMoveUp(); }} title="Move up" aria-label="Move block up">↑</button>}
+        {!isLast && <button className="eb-block-handle-btn" onClick={(e) => { e.stopPropagation(); onMoveDown(); }} title="Move down" aria-label="Move block down">↓</button>}
+        <button className="eb-block-handle-btn" onClick={(e) => { e.stopPropagation(); onDuplicate(); }} title="Duplicate" aria-label="Duplicate block">⧉</button>
+        <button className="eb-block-handle-btn eb-block-handle-delete" onClick={(e) => { e.stopPropagation(); onDelete(); }} title="Delete" aria-label="Delete block">✕</button>
       </div>
       {children}
     </div>

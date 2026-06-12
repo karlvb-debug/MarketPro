@@ -19,7 +19,7 @@ export default function DataTable({ headers, children, noBorder }: DataTableProp
         <thead>
           <tr>
             {headers.map((h) => (
-              <th key={h}>{h}</th>
+              <th key={h} scope="col">{h}</th>
             ))}
           </tr>
         </thead>

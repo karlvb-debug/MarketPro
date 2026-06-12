@@ -41,3 +41,6 @@ export type { SearchInputProps } from './SearchInput';
 
 // Feedback
 export { showToast, ToastProvider } from './Toast';
+
+export { default as LoadingState } from './LoadingState';
+export type { LoadingStateProps } from './LoadingState';

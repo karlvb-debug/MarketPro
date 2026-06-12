@@ -42,6 +42,7 @@ export default function Toolbar({
             className="toolbar-panel-toggle"
             onClick={onTogglePanel}
             aria-label="Toggle segments"
+            aria-expanded={panelOpen}
             title="Segments"
           >
             {panelOpen ? '✕' : '☰'}
@@ -58,16 +59,21 @@ export default function Toolbar({
         <div className="toolbar-center">
           {onSearchChange && (
             <div className="toolbar-search">
-              <span className="toolbar-search-icon">⌕</span>
+              <span className="toolbar-search-icon" aria-hidden="true">⌕</span>
               <input
                 type="text"
                 className="toolbar-search-input"
                 placeholder={searchPlaceholder}
+                aria-label={searchPlaceholder}
                 value={search || ''}
                 onChange={(e) => onSearchChange(e.target.value)}
               />
               {search && (
-                <button className="toolbar-search-clear" onClick={() => onSearchChange('')}>×</button>
+                <button
+                  className="toolbar-search-clear"
+                  onClick={() => onSearchChange('')}
+                  aria-label="Clear search"
+                >×</button>
               )}
             </div>
           )}

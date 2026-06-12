@@ -13,14 +13,15 @@ export interface SearchInputProps extends Omit<InputHTMLAttributes<HTMLInputElem
 }
 
 const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
-  ({ onValueChange, onChange, className = '', ...props }, ref) => {
+  ({ onValueChange, onChange, className = '', 'aria-label': ariaLabel, ...props }, ref) => {
     return (
       <div className={`search-input-wrapper ${className}`}>
-        <span className="search-icon">⌕</span>
+        <span className="search-icon" aria-hidden="true">⌕</span>
         <input
           ref={ref}
           type="search"
           className="search-input"
+          aria-label={ariaLabel ?? props.placeholder ?? 'Search'}
           onChange={(e) => {
             onChange?.(e);
             onValueChange?.(e.target.value);

@@ -42,7 +42,7 @@ export default function WorkspaceSwitcher() {
   return (
     <div className="ws-switcher" ref={menuRef}>
       {/* Current workspace button */}
-      <button className="ws-switcher-btn" onClick={() => setIsOpen(!isOpen)}>
+      <button className="ws-switcher-btn" onClick={() => setIsOpen(!isOpen)} aria-expanded={isOpen} aria-haspopup="menu">
         <div className="ws-avatar">{initials}</div>
         <div className="ws-info">
           <span className="ws-name">MarketPro</span>
@@ -76,6 +76,7 @@ export default function WorkspaceSwitcher() {
               <input
                 className="form-input"
                 placeholder="Workspace name..."
+                aria-label="Workspace name"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleCreate()}

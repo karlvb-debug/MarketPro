@@ -132,7 +132,7 @@ export default function ContactCard({
       {/* Header */}
       <div className="cc-header">
         <div className="cc-header-top">
-          <Button variant="ghost" size="sm" onClick={onClose}>✕</Button>
+          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close contact details">✕</Button>
           <div className="cc-header-actions">
             {activeTab === 'overview' && (
               isEditing ? (
@@ -188,6 +188,7 @@ export default function ContactCard({
               {isEditing ? (
                 <Input
                   type="email"
+                  aria-label="Email"
                   value={editData.email}
                   onChange={(e) => setEditData({ ...editData, email: e.target.value })}
                 />
@@ -204,6 +205,7 @@ export default function ContactCard({
               {isEditing ? (
                 <Input
                   type="tel"
+                  aria-label="Phone"
                   value={editData.phone}
                   onChange={(e) => setEditData({ ...editData, phone: e.target.value })}
                 />
@@ -219,6 +221,7 @@ export default function ContactCard({
               <span className="cc-detail-label">Company</span>
               {isEditing ? (
                 <Input
+                  aria-label="Company"
                   value={editData.company}
                   onChange={(e) => setEditData({ ...editData, company: e.target.value })}
                 />
@@ -235,6 +238,7 @@ export default function ContactCard({
               {isEditing ? (
                 <Input
                   placeholder="e.g. CA, FL, TX"
+                  aria-label="State"
                   value={editData.state}
                   onChange={(e) => setEditData({ ...editData, state: e.target.value.toUpperCase().slice(0, 2) })}
                   style={{ textTransform: 'uppercase', maxWidth: 80 }}
@@ -252,6 +256,7 @@ export default function ContactCard({
               {isEditing ? (
                 <Input
                   placeholder="e.g. America/New_York"
+                  aria-label="Timezone"
                   value={editData.timezone}
                   onChange={(e) => setEditData({ ...editData, timezone: e.target.value })}
                 />
@@ -323,6 +328,7 @@ export default function ContactCard({
               <div className="cc-segment-add">
                 <Select
                   value=""
+                  aria-label="Add to segment"
                   onChange={(e) => {
                     if (e.target.value) {
                       onAddToSegment([contact.contactId], e.target.value);
@@ -380,6 +386,7 @@ export default function ContactCard({
                         <span className="badge badge-success">Active</span>
                         <Select
                           value=""
+                          aria-label={`Suppress ${meta.label}`}
                           onChange={(e) => {
                             const reason = e.target.value as SuppressionReason;
                             if (reason) {

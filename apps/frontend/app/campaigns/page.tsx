@@ -6,7 +6,7 @@ import PageHeader from '../components/PageHeader';
 import StatusBadge, { SegmentBadge, ChannelIcon } from '../components/StatusBadge';
 import DataTable from '../components/DataTable';
 import ProgressBar from '../components/ProgressBar';
-import { Button, EmptyState, Modal, Field, Input, Select, RadioCard, showToast } from '../components/ui';
+import { Button, EmptyState, LoadingState, Modal, Field, Input, Select, RadioCard, showToast } from '../components/ui';
 
 export default function CampaignsPage() {
   const { campaigns, segments, templates, addCampaign, hydrated } = useStore();
@@ -32,7 +32,7 @@ export default function CampaignsPage() {
   const costPerMsg: Record<string, number> = { email: 0.001, sms: 0.0075, voice: 0.025 };
   const estCost = ((selectedSeg?.count || 0) * (costPerMsg[channel] || 0)).toFixed(2);
 
-  if (!hydrated) return null;
+  if (!hydrated) return <LoadingState />;
 
   return (
     <>
