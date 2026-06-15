@@ -79,7 +79,7 @@ export async function processCampaignDispatch<TTemplate, TSetup>(
   let cursor: string | null = null;
 
   for (;;) {
-    const page = await store.fetchContactsPage(campaign.segmentId, cursor, PAGE_SIZE);
+    const page = await store.fetchContactsPage(workspaceId, campaign.segmentId, cursor, PAGE_SIZE);
     if (page.length === 0) break;
     cursor = page[page.length - 1]!.contactId;
 

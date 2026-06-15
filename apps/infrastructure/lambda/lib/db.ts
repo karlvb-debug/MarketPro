@@ -49,6 +49,15 @@ export async function getPool(): Promise<Pool> {
   return pool;
 }
 
+/** Close the shared pool (tests only — Lambdas keep it warm). */
+export async function closePool(): Promise<void> {
+  if (pool) {
+    await pool.end();
+    pool = null;
+    db = null;
+  }
+}
+
 /**
  * Returns a Drizzle ORM client connected to the RDS instance.
  * Reuses the connection pool across Lambda invocations (warm starts).

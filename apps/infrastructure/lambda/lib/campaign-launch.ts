@@ -12,6 +12,7 @@
 
 import { Pool } from 'pg';
 import { authorizeCampaignFunds, getChannelPrice, multiplyPrice, Channel } from './billing';
+import { loadSegment, buildMembershipClause } from './segment-query';
 
 export interface LaunchableCampaign {
   campaignId: string;
@@ -26,19 +27,25 @@ export type LaunchResult =
   | { ok: false; reason: 'already_claimed' }
   | { ok: false; reason: 'insufficient_funds'; required: string; available: string; recipients: number };
 
-/** Contacts in the segment that are active and reachable on the channel. */
+/** Contacts in the segment (static or dynamic) that are active and reachable
+ *  on the channel — must match exactly what dispatch will send to. */
 export async function countEligibleRecipients(
   pool: Pool,
+  workspaceId: string,
   segmentId: string,
   channel: Channel,
 ): Promise<number> {
+  const segment = await loadSegment(pool, workspaceId, segmentId);
+  if (!segment) return 0;
+  const clause = await buildMembershipClause(pool, segment, 1);
   const recipientColumn = channel === 'email' ? 'c.email' : 'c.phone';
   const result = await pool.query(
     `SELECT COUNT(*)::int AS count
-       FROM contact_segment cs
-       JOIN contacts c ON c.contact_id = cs.contact_id
-      WHERE cs.segment_id = $1 AND c.status = 'active' AND ${recipientColumn} IS NOT NULL`,
-    [segmentId],
+       FROM contacts c
+      WHERE c.workspace_id = $1 AND c.status = 'active'
+        AND ${recipientColumn} IS NOT NULL
+        AND ${clause.text}`,
+    [workspaceId, ...clause.params],
   );
   return result.rows[0].count;
 }
@@ -73,7 +80,7 @@ export async function launchCampaign(
 
   try {
     // 2. ESTIMATE
-    const recipients = await countEligibleRecipients(pool, campaign.segmentId, campaign.channel);
+    const recipients = await countEligibleRecipients(pool, campaign.workspaceId, campaign.segmentId, campaign.channel);
     const price = await getChannelPrice(pool, campaign.workspaceId, campaign.channel);
     const estimatedCost = await multiplyPrice(pool, price, recipients);
 

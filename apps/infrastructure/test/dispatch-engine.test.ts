@@ -64,7 +64,7 @@ class InMemoryStore implements DispatchStore {
   async cancelCampaign(_campaignId: string, reason: string) {
     this.cancelled = reason;
   }
-  async fetchContactsPage(_segmentId: string, after: string | null, limit: number) {
+  async fetchContactsPage(_workspaceId: string, _segmentId: string, after: string | null, limit: number) {
     const sorted = [...this.contacts].sort((a, b) => a.contactId.localeCompare(b.contactId));
     const start = after ? sorted.findIndex((c) => c.contactId > after) : 0;
     if (start === -1) return [];
@@ -177,8 +177,8 @@ describe('processCampaignDispatch', () => {
     store.contacts = Array.from({ length: total }, (_, i) => makeContact(i));
     const pageSizes: number[] = [];
     const origFetch = store.fetchContactsPage.bind(store);
-    store.fetchContactsPage = async (seg, after, limit) => {
-      const page = await origFetch(seg, after, limit);
+    store.fetchContactsPage = async (ws, seg, after, limit) => {
+      const page = await origFetch(ws, seg, after, limit);
       pageSizes.push(page.length);
       return page;
     };

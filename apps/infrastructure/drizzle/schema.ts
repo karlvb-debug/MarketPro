@@ -15,6 +15,7 @@ export const consentTypeEnum = pgEnum('consent_type', ['opt_in', 'opt_out']);
 export const suppressionReasonEnum = pgEnum('suppression_reason', ['unsubscribe', 'complaint', 'bounce', 'gdpr_delete', 'manual']);
 export const consentSourceEnum = pgEnum('consent_source', ['collected_by_us', 'partner_with_proof', 'existing_customers', 'purchased_list', 'unknown']);
 export const customFieldTypeEnum = pgEnum('custom_field_type', ['text', 'number', 'date', 'email', 'phone', 'url', 'select']);
+export const segmentKindEnum = pgEnum('segment_kind', ['static', 'dynamic']);
 
 // ============================================
 // 1. WORKSPACES (existing)
@@ -120,6 +121,10 @@ export const segments = pgTable('segments', {
   folderId: uuid('folder_id'),                             // FK to segment_folders
   sortOrder: integer('sort_order').default(0),
   color: varchar('color', { length: 20 }),
+  kind: segmentKindEnum('kind').notNull().default('static'),  // 'static' = contact_segment rows; 'dynamic' = rules
+  rules: jsonb('rules'),                                       // Rule AST for dynamic segments (see lib/rules.ts)
+  cachedCount: integer('cached_count'),                       // Last computed membership count
+  countRefreshedAt: timestamp('count_refreshed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (table) => ({
   workspaceIdx: index('segments_workspace_idx').on(table.workspaceId),

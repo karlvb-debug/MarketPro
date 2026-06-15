@@ -87,8 +87,10 @@ export interface DispatchStore {
   fetchSettings(workspaceId: string): Promise<WorkspaceDispatchSettings | undefined>;
   cancelCampaign(campaignId: string, reason: string): Promise<void>;
 
-  /** Keyset page of active segment contacts with contactId > afterContactId. */
+  /** Keyset page of active segment contacts with contactId > afterContactId.
+   *  Resolves static and dynamic segment membership identically. */
   fetchContactsPage(
+    workspaceId: string,
     segmentId: string,
     afterContactId: string | null,
     limit: number,

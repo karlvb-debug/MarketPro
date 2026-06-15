@@ -1,10 +1,10 @@
-import { and, eq, gt, inArray, ne, sql } from 'drizzle-orm';
-import { getDb } from '../../lib/db';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
+import { getDb, getPool } from '../../lib/db';
 import { DEFAULT_CHANNEL_PRICES } from '../../lib/billing';
+import { buildMembershipClause, loadSegment, SegmentRow, MembershipClause } from '../../lib/segment-query';
 import {
   campaigns,
   contacts,
-  contactSegment,
   campaignMessages,
   suppressionList,
   workspaceSettings,
@@ -20,6 +20,19 @@ import {
 /** Production DispatchStore backed by the shared Drizzle/RDS client. */
 export async function createDispatchStore(): Promise<DispatchStore> {
   const db = await getDb();
+  const pool = await getPool();
+
+  // Resolve a segment's membership predicate once per invocation; dispatch
+  // calls fetchContactsPage repeatedly with the same segmentId.
+  const clauseCache = new Map<string, MembershipClause | null>();
+  async function membershipFor(workspaceId: string, segmentId: string): Promise<MembershipClause | null> {
+    const cached = clauseCache.get(segmentId);
+    if (cached !== undefined) return cached;
+    const segment: SegmentRow | null = await loadSegment(pool, workspaceId, segmentId);
+    const clause = segment ? await buildMembershipClause(pool, segment, 2) : null;
+    clauseCache.set(segmentId, clause);
+    return clause;
+  }
 
   return {
     async fetchCampaign(campaignId, workspaceId): Promise<DispatchCampaign | undefined> {
@@ -60,30 +73,24 @@ export async function createDispatchStore(): Promise<DispatchStore> {
         .where(and(eq(campaigns.campaignId, campaignId), ne(campaigns.status, 'completed')));
     },
 
-    async fetchContactsPage(segmentId, afterContactId, limit): Promise<DispatchContact[]> {
-      const conditions = [
-        eq(contactSegment.segmentId, segmentId),
-        eq(contacts.status, 'active'),
-      ];
-      if (afterContactId) {
-        conditions.push(gt(contacts.contactId, afterContactId));
-      }
-      const rows = await db
-        .select({
-          contactId: contacts.contactId,
-          email: contacts.email,
-          phone: contacts.phone,
-          firstName: contacts.firstName,
-          lastName: contacts.lastName,
-          company: contacts.company,
-          timezone: contacts.timezone,
-        })
-        .from(contactSegment)
-        .innerJoin(contacts, eq(contactSegment.contactId, contacts.contactId))
-        .where(and(...conditions))
-        .orderBy(contacts.contactId)
-        .limit(limit);
-      return rows;
+    async fetchContactsPage(workspaceId, segmentId, afterContactId, limit): Promise<DispatchContact[]> {
+      const clause = await membershipFor(workspaceId, segmentId);
+      if (!clause) return []; // segment no longer exists
+      const pageSize = Math.max(1, Math.min(2000, Math.floor(limit)));
+      const result = await pool.query(
+        `SELECT c.contact_id AS "contactId", c.email, c.phone,
+                c.first_name AS "firstName", c.last_name AS "lastName",
+                c.company, c.timezone
+           FROM contacts c
+          WHERE c.workspace_id = $1
+            AND ($2::uuid IS NULL OR c.contact_id > $2)
+            AND c.status = 'active'
+            AND ${clause.text}
+          ORDER BY c.contact_id
+          LIMIT ${pageSize}`,
+        [workspaceId, afterContactId, ...clause.params],
+      );
+      return result.rows;
     },
 
     async fetchSuppressedHashes(workspaceId, kind, hashes): Promise<Set<string>> {

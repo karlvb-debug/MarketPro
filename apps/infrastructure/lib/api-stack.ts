@@ -308,12 +308,17 @@ export class ApiStack extends cdk.Stack {
     segmentsResource.addMethod('GET', segmentsIntegration, securedMethodOptions);
     segmentsResource.addMethod('POST', segmentsIntegration, securedMethodOptions);
 
+    // /segments/preview-count — live count for an unsaved dynamic rule tree
+    const segmentsPreviewResource = segmentsResource.addResource('preview-count');
+    segmentsPreviewResource.addMethod('POST', segmentsIntegration, securedMethodOptions);
+
     const segmentIdResource = segmentsResource.addResource('{id}');
     segmentIdResource.addMethod('PUT', segmentsIntegration, securedMethodOptions);
     segmentIdResource.addMethod('DELETE', segmentsIntegration, securedMethodOptions);
 
-    // /segments/{id}/contacts — add/remove contacts from a segment
+    // /segments/{id}/contacts — preview membership (GET) + add/remove (static)
     const segmentContactsResource = segmentIdResource.addResource('contacts');
+    segmentContactsResource.addMethod('GET', segmentsIntegration, securedMethodOptions);
     segmentContactsResource.addMethod('POST', segmentsIntegration, securedMethodOptions);
     segmentContactsResource.addMethod('DELETE', segmentsIntegration, securedMethodOptions);
 
