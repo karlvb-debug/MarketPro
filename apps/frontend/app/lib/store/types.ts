@@ -76,6 +76,14 @@ export interface Segment {
   folder: string;     // folder name (empty = uncategorized)
   order: number;      // sort position
   color?: string;     // optional accent color
+  /** 'static' = explicit contact_segment rows; 'dynamic' = rule-based (Smart segment) */
+  kind: 'static' | 'dynamic';
+  /** Rule AST for dynamic segments (null for static) */
+  rules: RuleGroup | null;
+  /** Last computed membership count for dynamic segments (null for static) */
+  cachedCount: number | null;
+  /** ISO timestamp of the last cachedCount refresh (null when never computed) */
+  countRefreshedAt: string | null;
 }
 
 export interface SegmentFolder {
@@ -278,6 +286,10 @@ export interface RawSegmentRow {
   folderId?: string; folder_id?: string;
   sortOrder?: number; sort_order?: number;
   color?: string;
+  kind?: 'static' | 'dynamic';
+  rules?: RuleGroup | null;
+  cachedCount?: number | null; cached_count?: number | null;
+  countRefreshedAt?: string | null; count_refreshed_at?: string | null;
 }
 
 export interface RawCampaignRow {

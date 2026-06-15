@@ -223,11 +223,31 @@ export const api = {
   // Segments
   segments: {
     list: () => apiClient.get<ApiResponse<unknown[]>>('/segments'),
-    create: (data: unknown) => apiClient.post<unknown>('/segments', data),
-    update: (id: string, data: unknown) => apiClient.put<unknown>(`/segments/${id}`, data),
+    /** Create a static or dynamic segment. Dynamic requires `rules`. */
+    create: (body: {
+      name: string;
+      description?: string;
+      color?: string | null;
+      folder_id?: string | null;
+      kind?: 'static' | 'dynamic';
+      rules?: unknown;
+    }) => apiClient.post<unknown>('/segments', body),
+    /** Update name/description/color/sort and (dynamic only) rules. */
+    update: (id: string, body: {
+      name?: string;
+      description?: string;
+      color?: string | null;
+      sort_order?: number;
+      rules?: unknown;
+    }) => apiClient.put<{ message: string } | Record<string, unknown>>(`/segments/${id}`, body),
     delete: (id: string) => apiClient.delete(`/segments/${id}`),
     addContacts: (id: string, contactIds: string[]) => apiClient.post(`/segments/${id}/contacts`, { contactIds }),
     removeContacts: (id: string, contactIds: string[]) => apiClient.delete(`/segments/${id}/contacts`, { contactIds }),
+    /** Paginated membership preview — works for both static and dynamic segments. */
+    listContacts: (id: string, params?: { cursor?: string | null; pageSize?: number }) =>
+      apiClient.get<ApiResponse<unknown[]>>(`/segments/${id}/contacts${toQuery(params)}`),
+    /** Live count for an unsaved rule tree. Throws ApiError (400) on invalid rules. */
+    previewCount: (rules: unknown) => apiClient.post<{ total: number }>('/segments/preview-count', { rules }),
   },
 
   // Campaigns

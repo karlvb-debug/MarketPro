@@ -9,7 +9,9 @@ import { useConfirm } from '../components/ConfirmDialog';
 import ContactCard from '../components/ContactCard';
 import SegmentPanel from '../components/SegmentPanel';
 import ImportWizard from '../components/ImportWizard';
+import SegmentBuilderModal from '../components/SegmentBuilderModal';
 import { validatePhone } from '../lib/contact-utils';
+import { CORE_RULE_FIELDS } from '../lib/rule-fields';
 
 // ---- FILTER CHIPS ----
 interface ActiveFilter {
@@ -30,7 +32,12 @@ const BASE_OP: Record<ActiveFilter['operator'], RuleOp> = {
   is_not_empty: 'is_set',
 };
 
-// Chip field key → server rule field
+// Chip field key → server rule field. The server field names (and their
+// operator matrix) live in app/lib/rule-fields.ts (CORE_RULE_FIELDS /
+// OPS_BY_TYPE) — the same registry the RuleBuilder uses — so the chips and the
+// Smart-segment builder share one source of truth for what's filterable. The
+// chip UI keeps camelCase keys + a reduced operator set, so only the mapping
+// lives here; the dev assertion below keeps it honest if a field is renamed.
 const CORE_FIELD_MAP: Record<string, string> = {
   firstName: 'first_name',
   lastName: 'last_name',
@@ -40,6 +47,16 @@ const CORE_FIELD_MAP: Record<string, string> = {
   timezone: 'timezone',
   source: 'source',
 };
+
+// Every chip target must exist in the shared rule-field registry.
+if (process.env.NODE_ENV !== 'production') {
+  const known = new Set(CORE_RULE_FIELDS.map((f) => f.field));
+  for (const serverField of Object.values(CORE_FIELD_MAP)) {
+    if (!known.has(serverField)) {
+      console.warn(`[contacts] chip maps to unknown rule field '${serverField}'`);
+    }
+  }
+}
 
 /**
  * Convert the active filter chips to a server rules tree. Ops are adjusted
@@ -159,6 +176,11 @@ export default function ContactsPage() {
   const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '', company: '', timezone: '', segments: [] as string[] });
   const [showBulkEditModal, setShowBulkEditModal] = useState(false);
   const [bulkEditData, setBulkEditData] = useState({ company: '', state: '', timezone: '' });
+
+  // "Save current filter as a Smart Segment" — opens the builder pre-loaded
+  // with the active filters' RuleGroup.
+  const [smartSegmentRules, setSmartSegmentRules] = useState<RuleGroup | null>(null);
+  const [showSmartSegmentModal, setShowSmartSegmentModal] = useState(false);
 
   // ---- FILTERS ----
   const [filters, setFilters] = useState<ActiveFilter[]>([]);
@@ -284,8 +306,27 @@ export default function ContactsPage() {
   // Synchronize local search/segment/filters to store. Active filter chips
   // are compiled to a rules tree and served by POST /contacts/search; with
   // no usable chips the store falls back to the plain GET list path.
+  //
+  // Dynamic (Smart) segments have no contact_segment rows, so the usual
+  // in_segment membership path can't list them. Instead we fold the segment's
+  // own RuleGroup into the search rules and clear segmentId — this reuses
+  // api.contacts.search and yields the right members + total count.
   useEffect(() => {
-    const rules = buildRulesFromFilters(filters, segmentsRef.current, customFieldsRef.current || []);
+    const chipRules = buildRulesFromFilters(filters, segmentsRef.current, customFieldsRef.current || []);
+    const active = activeSegmentId
+      ? segmentsRef.current.find((s) => s.segmentId === activeSegmentId) || null
+      : null;
+    const dynamicActive = active?.kind === 'dynamic' && active.rules ? active : null;
+
+    let rules = chipRules;
+    let segmentId = activeSegmentId;
+    if (dynamicActive) {
+      // Combine the segment's rules with any active chip filters (AND).
+      const parts = [dynamicActive.rules as RuleGroup];
+      if (chipRules) parts.push(chipRules);
+      rules = { combinator: 'and', conditions: parts };
+      segmentId = null; // membership comes from the rules, not contact_segment
+    }
 
     // Legacy GET path fallback: extract a status filter for the list endpoint
     const statusFilter = filters.find((f) => f.field === 'status');
@@ -293,7 +334,7 @@ export default function ContactsPage() {
 
     setContactsFilter({
       search,
-      segmentId: activeSegmentId,
+      segmentId,
       status,
       rules,
     });
@@ -547,6 +588,18 @@ export default function ContactsPage() {
                   title="Save as view"
                 >💾 Save View</button>
               )}
+              {filters.length > 0 && (
+                <button
+                  className="filter-save-btn"
+                  onClick={() => {
+                    const rules = buildRulesFromFilters(filters, segmentsRef.current, customFieldsRef.current || []);
+                    if (!rules) { showToast('Add at least one filled-in filter first', 'error'); return; }
+                    setSmartSegmentRules(rules);
+                    setShowSmartSegmentModal(true);
+                  }}
+                  title="Save the current filters as a rule-based Smart Segment"
+                >⚡ Save as Smart Segment</button>
+              )}
             </div>
           )}
 
@@ -794,6 +847,18 @@ export default function ContactsPage() {
         customFields={settings.customFields}
         importContacts={importContacts}
         refreshContacts={refreshContacts}
+      />
+      {/* ===== SAVE FILTERS AS SMART SEGMENT ===== */}
+      <SegmentBuilderModal
+        isOpen={showSmartSegmentModal}
+        onClose={() => setShowSmartSegmentModal(false)}
+        initialRules={smartSegmentRules}
+        onSaved={(id) => {
+          // Switch to the new dynamic segment and drop the ad-hoc chips.
+          setFilters([]);
+          setActiveViewId(null);
+          setActiveSegmentId(id);
+        }}
       />
       {/* ===== BULK ADD TO SEGMENT MODAL ===== */}
       <Modal isOpen={showBulkSegmentModal} onClose={() => setShowBulkSegmentModal(false)} title="Add to Segment" width="400px">

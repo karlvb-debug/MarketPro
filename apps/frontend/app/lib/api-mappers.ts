@@ -270,6 +270,33 @@ export function mapApiSegment(row: ApiSegment): Segment {
     folder: row.folder_id || '',
     order: row.sort_order,
     color: row.color || undefined,
+    kind: 'static',
+    rules: null,
+    cachedCount: null,
+    countRefreshedAt: null,
+  };
+}
+
+/**
+ * Map a raw segment row (camelCase or snake_case, fields possibly missing) →
+ * frontend Segment. Used by the batch loader and by create/update responses,
+ * so dynamic-segment fields (kind/rules/cachedCount) survive a round-trip.
+ */
+export function mapRawSegment(row: import('./store/types').RawSegmentRow): Segment {
+  const kind = row.kind === 'dynamic' ? 'dynamic' : 'static';
+  const cachedCount = row.cachedCount ?? row.cached_count ?? null;
+  return {
+    segmentId: row.segmentId || row.segment_id || crypto.randomUUID(),
+    name: row.name || '',
+    description: row.description || '',
+    count: row.contactCount ?? row.contact_count ?? (kind === 'dynamic' ? cachedCount ?? 0 : 0),
+    folder: row.folderId || row.folder_id || '',
+    order: row.sortOrder ?? row.sort_order ?? 0,
+    color: row.color || undefined,
+    kind,
+    rules: kind === 'dynamic' ? (row.rules ?? null) : null,
+    cachedCount,
+    countRefreshedAt: row.countRefreshedAt ?? row.count_refreshed_at ?? null,
   };
 }
 

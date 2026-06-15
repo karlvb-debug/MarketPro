@@ -3,7 +3,7 @@
 // ============================================
 
 import { api } from '../api-client';
-import { mapApiCustomField } from '../api-mappers';
+import { mapApiCustomField, mapRawSegment } from '../api-mappers';
 import type {
   BatchLoadResponse,
   Campaign,
@@ -34,15 +34,7 @@ export async function loadFromApi(): Promise<StoreData | null> {
       .map(mapApiCustomField);
 
     const rawSegments = res.segments || [];
-    const segments: Segment[] = rawSegments.map((row) => ({
-      segmentId: row.segmentId || row.segment_id || crypto.randomUUID(),
-      name: row.name || '',
-      description: row.description || '',
-      count: row.contactCount || row.contact_count || 0,
-      folder: row.folderId || row.folder_id || '',
-      order: row.sortOrder || row.sort_order || 0,
-      color: row.color || undefined,
-    }));
+    const segments: Segment[] = rawSegments.map(mapRawSegment);
 
     const rawCampaigns = res.campaigns || [];
     const campaigns: Campaign[] = rawCampaigns.map((row) => ({

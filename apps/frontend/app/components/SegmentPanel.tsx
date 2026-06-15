@@ -4,6 +4,7 @@ import { useState, useRef } from 'react';
 import { useStore, Segment } from '../lib/store';
 import { showToast } from './ui';
 import { useConfirm } from './ConfirmDialog';
+import SegmentBuilderModal from './SegmentBuilderModal';
 
 interface SegmentPanelProps {
   activeSegmentId: string | null; // null = "All Contacts"
@@ -24,6 +25,10 @@ export default function SegmentPanel({ activeSegmentId, onSelectSegment }: Segme
   const [editName, setEditName] = useState('');
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
+
+  // Smart (dynamic) segment builder modal — create or edit.
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [editingSegment, setEditingSegment] = useState<Segment | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -71,10 +76,16 @@ export default function SegmentPanel({ activeSegmentId, onSelectSegment }: Segme
     setDragOverFolder(null);
   };
 
+  const openBuilderForEdit = (seg: Segment) => {
+    setEditingSegment(seg);
+    setBuilderOpen(true);
+  };
+
   // Segment item renderer
   const renderSegmentItem = (seg: Segment) => {
     const isActive = activeSegmentId === seg.segmentId;
     const isEditing = editingId === seg.segmentId;
+    const isDynamic = seg.kind === 'dynamic';
     const count = seg.count;
 
     return (
@@ -98,6 +109,13 @@ export default function SegmentPanel({ activeSegmentId, onSelectSegment }: Segme
           />
         ) : (
           <>
+            <span
+              className={`sp-kind-badge ${isDynamic ? 'sp-kind-dynamic' : 'sp-kind-static'}`}
+              title={isDynamic ? 'Smart segment (rule-based)' : 'Static segment'}
+              aria-label={isDynamic ? 'Smart segment' : 'Static segment'}
+            >
+              {isDynamic ? '⚡' : '◍'}
+            </span>
             <span className="sp-item-name">{seg.name}</span>
             <span className="sp-item-count">{count}</span>
           </>
@@ -105,9 +123,12 @@ export default function SegmentPanel({ activeSegmentId, onSelectSegment }: Segme
         <div className="sp-item-actions" onClick={(e) => e.stopPropagation()}>
           <button
             className="sp-action-btn"
-            title="Rename"
-            aria-label={`Rename segment ${seg.name}`}
-            onClick={() => { setEditingId(seg.segmentId); setEditName(seg.name); }}
+            title={isDynamic ? 'Edit rules' : 'Rename'}
+            aria-label={isDynamic ? `Edit smart segment ${seg.name}` : `Rename segment ${seg.name}`}
+            onClick={() => {
+              if (isDynamic) { openBuilderForEdit(seg); }
+              else { setEditingId(seg.segmentId); setEditName(seg.name); }
+            }}
           >✎</button>
           <button
             className="sp-action-btn"
@@ -151,6 +172,7 @@ export default function SegmentPanel({ activeSegmentId, onSelectSegment }: Segme
         <div className="sp-header-actions">
           <button className="sp-header-btn" title="New Folder" aria-label="New folder" onClick={() => setCreatingFolder(true)}>+</button>
           <button className="sp-header-btn" title="New Segment" aria-label="New segment" onClick={() => { setCreatingIn(''); setTimeout(() => inputRef.current?.focus(), 50); }}>+</button>
+          <button className="sp-header-btn" title="New Smart Segment" aria-label="New smart segment" onClick={() => { setEditingSegment(null); setBuilderOpen(true); }}>⚡</button>
         </div>
       </div>
 
@@ -252,6 +274,13 @@ export default function SegmentPanel({ activeSegmentId, onSelectSegment }: Segme
           </div>
         )}
       </div>
+
+      <SegmentBuilderModal
+        isOpen={builderOpen}
+        onClose={() => { setBuilderOpen(false); setEditingSegment(null); }}
+        editingSegment={editingSegment}
+        onSaved={(id) => onSelectSegment(id)}
+      />
     </div>
   );
 }

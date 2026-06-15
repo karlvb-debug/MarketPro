@@ -37,6 +37,7 @@
     }
   },
   "globalEnv": [
-    "CI"
+    "CI",
+    "NODE_ENV"
   ]
 }

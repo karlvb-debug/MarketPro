@@ -1,6 +1,6 @@
 # Contacts Module — Deep Feature Plan
 
-> Status: C1 ✅ DONE (June 12, 2026) · C2–C5 planned · Created June 12, 2026
+> Status: C1 ✅ · C2 ✅ DONE (June 15, 2026) · C3–C5 planned · Created June 12, 2026
 > Goal: make contact management the strongest part of the product — typed
 > custom fields, rule-based dynamic segments, server-side filtering and
 > views, per-contact send history and consent evidence, dedup/merge, and
@@ -89,7 +89,7 @@ the rule engine can use them.*
   column picker including custom fields; ImportWizard map step offers
   defined fields (and create-field-on-the-fly for admins).
 
-### C2 — Dynamic segments + campaign integration (~2 weeks)
+### C2 — Dynamic segments + campaign integration (~2 weeks) — ✅ DONE
 
 - **Segment types**: `static` (today's lists) and `dynamic` (stored rule
   AST + cached count + `count_refreshed_at`). Schema: `segments.kind`,

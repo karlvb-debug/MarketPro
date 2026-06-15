@@ -63,6 +63,8 @@ export function useStore() {
 
   const {
     addSegment,
+    createSegment,
+    updateSegment,
     deleteSegment,
     renameSegment,
     addContactsToSegment,
@@ -128,10 +130,14 @@ export function useStore() {
 
   // ---- COMPUTED VALUES ----
 
-  // Recompute segment counts from actual contact data
+  // Recompute static segment counts from actual contact data. Dynamic
+  // (rule-based) segments have no local membership rows, so they keep the
+  // server-computed cachedCount instead.
   const segments = data.segments.map((seg) => ({
     ...seg,
-    count: data.contacts.filter((c) => c.segments.includes(seg.name)).length,
+    count: seg.kind === 'dynamic'
+      ? (seg.cachedCount ?? 0)
+      : data.contacts.filter((c) => c.segments.includes(seg.name)).length,
   }));
 
   // Ensure settings always has defaults (for stores created before settings existed)
@@ -193,6 +199,8 @@ export function useStore() {
     addCampaign,
     markRead,
     addSegment,
+    createSegment,
+    updateSegment,
     deleteSegment,
     renameSegment,
     addContactsToSegment,
