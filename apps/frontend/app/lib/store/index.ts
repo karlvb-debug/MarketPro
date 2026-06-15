@@ -54,6 +54,8 @@ export function useStore() {
     updateCompliance,
     deleteContact,
     bulkDeleteContacts,
+    bulkAction,
+    mergeContacts,
     importContacts,
   } = useContactsSlice({ data, setData });
 
@@ -195,6 +197,8 @@ export function useStore() {
     updateCompliance,
     deleteContact,
     bulkDeleteContacts,
+    bulkAction,
+    mergeContacts,
     importContacts,
     addCampaign,
     markRead,

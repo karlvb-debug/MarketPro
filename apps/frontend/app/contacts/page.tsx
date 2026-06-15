@@ -5,11 +5,12 @@ import { useStore, Contact, CustomField, Segment, RuleCondition, RuleGroup, Rule
 import Toolbar from '../components/Toolbar';
 import DataTable from '../components/DataTable';
 import { Button, EmptyState, Modal, Field, Input, Select, Checkbox, FormActions, showToast } from '../components/ui';
-import { useConfirm } from '../components/ConfirmDialog';
 import ContactCard from '../components/ContactCard';
 import SegmentPanel from '../components/SegmentPanel';
 import ImportWizard from '../components/ImportWizard';
 import SegmentBuilderModal from '../components/SegmentBuilderModal';
+import BulkActionBar from '../components/BulkActionBar';
+import DuplicateReviewModal from '../components/DuplicateReviewModal';
 import { validatePhone } from '../lib/contact-utils';
 import { CORE_RULE_FIELDS } from '../lib/rule-fields';
 
@@ -160,14 +161,13 @@ function buildRulesFromFilters(
 export default function ContactsPage() {
   const {
     contacts, segments, settings, addContact, updateContact, deleteContact,
-    importContacts, bulkDeleteContacts, addContactsToSegment, removeContactsFromSegment, hydrated,
+    importContacts, addContactsToSegment, removeContactsFromSegment, hydrated,
     refreshContacts, contactsMeta, contactsLoading, setContactsFilter, loadContacts,
+    bulkAction, mergeContacts,
   } = useStore();
-  const confirm = useConfirm();
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [showBulkSegmentModal, setShowBulkSegmentModal] = useState(false);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -176,6 +176,7 @@ export default function ContactsPage() {
   const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '', company: '', timezone: '', segments: [] as string[] });
   const [showBulkEditModal, setShowBulkEditModal] = useState(false);
   const [bulkEditData, setBulkEditData] = useState({ company: '', state: '', timezone: '' });
+  const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
 
   // "Save current filter as a Smart Segment" — opens the builder pre-loaded
   // with the active filters' RuleGroup.
@@ -355,6 +356,15 @@ export default function ContactsPage() {
 
   const displayContacts = contacts;
 
+  // Rules compiled from the active filter chips — the same RuleGroup the
+  // server-side list/search uses. Drives the bulk action bar's "apply to all
+  // matching" scope (sends { rules } instead of { contactIds }).
+  const filterRules = useMemo(
+    () => buildRulesFromFilters(filters, segments, settings.customFields || []),
+    [filters, segments, settings.customFields],
+  );
+  const allOnPageSelected = displayContacts.length > 0 && displayContacts.every((c) => selectedIds.has(c.contactId));
+
   // Selection
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -389,20 +399,6 @@ export default function ContactsPage() {
     showToast(`Contact ${form.firstName} ${form.lastName} added`);
     setForm({ firstName: '', lastName: '', email: '', phone: '', company: '', timezone: '', segments: [] });
     setShowAddModal(false);
-  };
-
-  const handleBulkAddToSegment = (segName: string) => {
-    addContactsToSegment(Array.from(selectedIds), segName);
-    showToast(`${selectedIds.size} contacts added to "${segName}"`);
-    setSelectedIds(new Set());
-    setShowBulkSegmentModal(false);
-  };
-
-  const handleBulkRemoveFromSegment = () => {
-    if (!activeSegment) return;
-    removeContactsFromSegment(Array.from(selectedIds), activeSegment.name);
-    showToast(`${selectedIds.size} contacts removed from "${activeSegment.name}"`);
-    setSelectedIds(new Set());
   };
 
   const toggleFormSegment = (segName: string) => {
@@ -504,6 +500,9 @@ export default function ContactsPage() {
                 <Button size="sm" onClick={exportCsv} title="Export contacts as CSV">
                   ↓ Export
                 </Button>
+                <Button size="sm" onClick={() => setShowDuplicatesModal(true)} title="Find and merge duplicate contacts">
+                  ⧉ Find Duplicates
+                </Button>
                 <Button size="sm" onClick={() => setShowImportModal(true)}>
                   Import CSV / Excel
                 </Button>
@@ -514,34 +513,23 @@ export default function ContactsPage() {
             }
             bulkBar={selectedIds.size > 0 ? (
               <>
-                <span className="text-sm text-secondary">{selectedIds.size} selected</span>
-                <Button size="xs" onClick={() => setShowBulkSegmentModal(true)}>
-                  Add to Segment
-                </Button>
+                <BulkActionBar
+                  selectedIds={selectedIds}
+                  matchingTotal={contactsMeta.total}
+                  filtersActive={filters.length > 0}
+                  filterRules={filterRules}
+                  allOnPageSelected={allOnPageSelected}
+                  segments={segments}
+                  customFields={settings.customFields || []}
+                  onBulkAction={bulkAction}
+                  onClearSelection={() => setSelectedIds(new Set())}
+                />
+                <span className="bulk-action-divider" aria-hidden="true" />
                 <Button size="xs" onClick={() => { setShowBulkEditModal(true); setBulkEditData({ company: '', state: '', timezone: '' }); }}>
                   ✏ Edit
                 </Button>
                 <Button size="xs" onClick={exportCsv}>
                   ↓ Export Selected
-                </Button>
-                {activeSegment && (
-                  <Button size="xs" onClick={handleBulkRemoveFromSegment}>
-                    Remove from {activeSegment.name}
-                  </Button>
-                )}
-                <Button variant="danger" size="xs" onClick={async () => {
-                  const ok = await confirm(
-                    `Permanently delete ${selectedIds.size} contact${selectedIds.size !== 1 ? 's' : ''}? This cannot be undone.`,
-                    { title: 'Delete Contacts', variant: 'danger', confirmLabel: `Delete ${selectedIds.size}` }
-                  );
-                  if (ok) {
-                    const ids = Array.from(selectedIds);
-                    bulkDeleteContacts(ids);
-                    showToast(`${ids.length} contact${ids.length !== 1 ? 's' : ''} deleted`);
-                    setSelectedIds(new Set());
-                  }
-                }}>
-                  🗑 Delete {selectedIds.size}
                 </Button>
               </>
             ) : undefined}
@@ -881,25 +869,12 @@ export default function ContactsPage() {
           setActiveSegmentId(id);
         }}
       />
-      {/* ===== BULK ADD TO SEGMENT MODAL ===== */}
-      <Modal isOpen={showBulkSegmentModal} onClose={() => setShowBulkSegmentModal(false)} title="Add to Segment" width="400px">
-        <p className="text-secondary mb-5 text-sm" >
-          Choose a segment to add {selectedIds.size} selected contact{selectedIds.size > 1 ? 's' : ''} to:
-        </p>
-        <div className="segment-pick-list">
-          {segments.map((seg) => (
-            <button key={seg.segmentId} className="segment-pick-item" onClick={() => handleBulkAddToSegment(seg.name)}>
-              <span>{seg.name}</span>
-              <span className="text-tertiary text-xs" >{seg.count} contacts</span>
-            </button>
-          ))}
-          {segments.length === 0 && (
-            <p className="text-tertiary text-sm text-center p-6">
-              No segments yet. Create one from the panel on the left.
-            </p>
-          )}
-        </div>
-      </Modal>
+      {/* ===== DUPLICATE REVIEW ===== */}
+      <DuplicateReviewModal
+        isOpen={showDuplicatesModal}
+        onClose={() => setShowDuplicatesModal(false)}
+        onMerge={mergeContacts}
+      />
 
       {/* ===== BULK EDIT MODAL ===== */}
       <Modal isOpen={showBulkEditModal} onClose={() => setShowBulkEditModal(false)} title={`Edit ${selectedIds.size} Contact${selectedIds.size > 1 ? 's' : ''}`} width="420px">

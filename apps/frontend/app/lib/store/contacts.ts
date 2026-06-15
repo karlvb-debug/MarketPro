@@ -6,7 +6,7 @@
 // ============================================
 
 import { useState, useCallback, useRef } from 'react';
-import { api, ApiError } from '../api-client';
+import { api, ApiError, type BulkAction, type BulkSelection } from '../api-client';
 import { contactToApi } from '../api-mappers';
 import { showToast } from '../../components/ui/Toast';
 import type {
@@ -20,6 +20,7 @@ import type {
   SuppressionReason,
 } from './types';
 import { defaultCompliance } from './seed';
+import { loadFromApi } from './load';
 
 interface ContactsSliceDeps {
   data: StoreData;
@@ -389,6 +390,74 @@ export function useContactsSlice({ data, setData }: ContactsSliceDeps) {
     }
   }, [setData]);
 
+  // Reload segment counts from the server without disturbing other store
+  // slices — used after bulk/merge operations that change membership.
+  const refreshSegmentCounts = useCallback(async () => {
+    const fresh = await loadFromApi();
+    if (fresh) {
+      setData((prev) => ({ ...prev, segments: fresh.segments }));
+    }
+  }, [setData]);
+
+  // Selection-aware bulk action. `selection` is either explicit contactIds
+  // ("the rows I checked") or a rule tree ("everything matching the filters").
+  // On success: toast the affected count and refresh the contact list; for
+  // membership/status-changing actions also refresh segment counts. Throws the
+  // ApiError on failure (after toasting) so callers can react if they need to.
+  const bulkAction = useCallback(async (
+    selection: BulkSelection,
+    action: BulkAction,
+  ): Promise<{ affected: number }> => {
+    try {
+      const res = await api.contacts.bulk({ selection, action });
+      const affected = res?.affected ?? 0;
+      const noun = `contact${affected === 1 ? '' : 's'}`;
+      const messages: Record<BulkAction['type'], string> = {
+        add_segment: `Added ${affected} ${noun} to the segment`,
+        remove_segment: `Removed ${affected} ${noun} from the segment`,
+        set_custom_field: `Updated ${affected} ${noun}`,
+        unsubscribe: `Unsubscribed ${affected} ${noun}`,
+        delete: `Deleted ${affected} ${noun}`,
+      };
+      showToast(messages[action.type]);
+      // Reload the visible page; segment membership / status changes also need
+      // the segment counts refreshed so the left panel stays accurate.
+      await loadContacts(true);
+      if (action.type !== 'set_custom_field') {
+        await refreshSegmentCounts();
+      }
+      return { affected };
+    } catch (err) {
+      console.error('[API] Bulk action failed:', err);
+      const message = (err as Partial<ApiError> | null)?.message || 'Bulk action failed.';
+      showToast(message, 'error');
+      throw err;
+    }
+  }, [loadContacts, refreshSegmentCounts]);
+
+  // Merge duplicates into a survivor (admin only). Survivor keeps its non-empty
+  // fields; duplicates are deleted. On success toast the merged count and
+  // refresh contacts + segment counts. Throws the ApiError on failure (after
+  // toasting) so the duplicate-review UI can keep its modal open.
+  const mergeContacts = useCallback(async (
+    survivorId: string,
+    duplicateIds: string[],
+  ): Promise<{ survivorId: string; mergedCount: number }> => {
+    try {
+      const res = await api.contacts.merge({ survivorId, duplicateIds });
+      const mergedCount = res?.mergedCount ?? 0;
+      showToast(`Merged ${mergedCount} contact${mergedCount === 1 ? '' : 's'}`);
+      await loadContacts(true);
+      await refreshSegmentCounts();
+      return { survivorId: res?.survivorId ?? survivorId, mergedCount };
+    } catch (err) {
+      console.error('[API] Merge contacts failed:', err);
+      const message = (err as Partial<ApiError> | null)?.message || 'Merge failed.';
+      showToast(message, 'error');
+      throw err;
+    }
+  }, [loadContacts, refreshSegmentCounts]);
+
   // Guard against overlapping imports interleaving state mutations
   const importInFlightRef = useRef(false);
 
@@ -591,6 +660,8 @@ export function useContactsSlice({ data, setData }: ContactsSliceDeps) {
     updateCompliance,
     deleteContact,
     bulkDeleteContacts,
+    bulkAction,
+    mergeContacts,
     importContacts,
   };
 }

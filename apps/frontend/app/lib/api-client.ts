@@ -52,6 +52,33 @@ export interface ApiResponse<T> {
   };
 }
 
+/** A cluster of 2+ contacts sharing a normalized email or phone (GET /contacts/duplicates). */
+export interface DuplicateCluster {
+  keyType: 'email' | 'phone';
+  key: string;
+  contactIds: string[];
+}
+
+/** Result of POST /contacts/merge. */
+export interface MergeResult {
+  survivorId: string;
+  mergedCount: number;
+}
+
+/**
+ * Selection for a bulk action: either explicit ids ("the N rows I checked")
+ * or a rule tree ("everything matching the active filters").
+ */
+export type BulkSelection = { contactIds: string[] } | { rules: unknown };
+
+/** A bulk action applied to the selection (POST /contacts/bulk). */
+export type BulkAction =
+  | { type: 'add_segment'; segmentId: string }
+  | { type: 'remove_segment'; segmentId: string }
+  | { type: 'set_custom_field'; key: string; value: unknown }
+  | { type: 'unsubscribe' }
+  | { type: 'delete' };
+
 // ============================================
 // Core fetch wrapper
 // ============================================
@@ -214,6 +241,15 @@ export const api = {
     /** Server-side rule filtering — rules is a { combinator, conditions } tree */
     search: (body: { rules?: unknown; cursor?: string | null; pageSize?: number }) =>
       apiClient.post<ApiResponse<unknown[]>>('/contacts/search', body),
+    /** Clusters of 2+ contacts sharing a normalized email/phone. */
+    duplicates: (params?: { limit?: number }) =>
+      apiClient.get<ApiResponse<DuplicateCluster[]>>(`/contacts/duplicates${toQuery(params)}`),
+    /** Fold duplicates into a survivor (admin only). Survivor wins non-empty fields. */
+    merge: (body: { survivorId: string; duplicateIds: string[] }) =>
+      apiClient.post<MergeResult>('/contacts/merge', body),
+    /** Selection-aware bulk action (editor; admin for delete). */
+    bulk: (body: { selection: BulkSelection; action: BulkAction }) =>
+      apiClient.post<{ affected: number }>('/contacts/bulk', body),
   },
 
   // Custom field definitions

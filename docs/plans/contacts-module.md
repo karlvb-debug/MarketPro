@@ -1,6 +1,6 @@
 # Contacts Module — Deep Feature Plan
 
-> Status: C1 ✅ · C2 ✅ · C3 ✅ DONE (June 15, 2026) · C4–C5 planned · Created June 12, 2026
+> Status: C1 ✅ · C2 ✅ · C3 ✅ · C4 ✅ DONE (June 15, 2026) · C5 planned · Created June 12, 2026
 > Goal: make contact management the strongest part of the product — typed
 > custom fields, rule-based dynamic segments, server-side filtering and
 > views, per-contact send history and consent evidence, dedup/merge, and
@@ -128,7 +128,7 @@ the rule engine can use them.*
   consent ledger) instead of the frontend-only compliance model — closes
   the model mismatch.
 
-### C4 — Data quality: dedup, merge, bulk operations (~1.5 weeks)
+### C4 — Data quality: dedup, merge, bulk operations (~1.5 weeks) — ✅ DONE
 
 - **Duplicate report**: `GET /contacts/duplicates` — clusters by normalized
   email/phone collision across the workspace (import-time dedup misses
