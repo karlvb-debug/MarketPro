@@ -2081,6 +2081,104 @@
 .cc-timeline-time {
   font-size: var(--text-xs);
   color: var(--text-tertiary);
+  cursor: default;
+}
+
+/* Engagement stat grid */
+.cc-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-2);
+}
+
+.cc-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+}
+
+.cc-stat-value {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.1;
+}
+
+.cc-stat-label {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.cc-stat-hint {
+  font-size: var(--text-xs);
+  color: var(--accent-info);
+}
+
+/* Consent evidence ledger */
+.cc-ledger {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.cc-ledger-item {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-secondary);
+}
+
+.cc-ledger-mark {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  margin-top: 1px;
+}
+
+.cc-ledger-mark-in {
+  color: var(--accent-success);
+  background: var(--accent-success-bg);
+}
+
+.cc-ledger-mark-out {
+  color: var(--accent-danger);
+  background: var(--accent-danger-bg);
+}
+
+.cc-ledger-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cc-ledger-headline {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.cc-ledger-channel {
+  font-weight: 400;
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+
+.cc-ledger-meta {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
 }
 
 /* Footer */

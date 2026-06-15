@@ -182,6 +182,19 @@ export default function ContactsPage() {
   const [smartSegmentRules, setSmartSegmentRules] = useState<RuleGroup | null>(null);
   const [showSmartSegmentModal, setShowSmartSegmentModal] = useState(false);
 
+  // Compact "x days ago" hint for the engagement column.
+  const lastEngagedHint = (iso: string | null | undefined): string => {
+    if (!iso) return '—';
+    const t = new Date(iso).getTime();
+    if (Number.isNaN(t)) return '—';
+    const days = Math.floor((Date.now() - t) / 86_400_000);
+    if (days <= 0) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days < 30) return `${days}d ago`;
+    if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+    return `${Math.floor(days / 365)}y ago`;
+  };
+
   // ---- FILTERS ----
   const [filters, setFilters] = useState<ActiveFilter[]>([]);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
@@ -653,7 +666,7 @@ export default function ContactsPage() {
           )}
 
           {contactsLoading && displayContacts.length === 0 ? (
-            <DataTable headers={['', 'Name', 'Email', 'Phone', 'Company', 'Segments']}>
+            <DataTable headers={['', 'Name', 'Email', 'Phone', 'Company', 'Segments', 'Last Engaged']}>
               <tr>
                 <th style={{ width: '40px', padding: '0 var(--space-3)' }} />
                 <th>Name</th>
@@ -661,6 +674,7 @@ export default function ContactsPage() {
                 <th className="hide-mobile">Phone</th>
                 <th className="hide-mobile">Company</th>
                 <th className="hide-mobile">Segments</th>
+                <th className="hide-mobile">Last Engaged</th>
               </tr>
               {[...Array(5)].map((_, i) => (
                 <tr key={i}>
@@ -682,6 +696,9 @@ export default function ContactsPage() {
                   <td className="hide-mobile">
                     <div className="skeleton-bar" style={{ width: '140px', height: '16px' }} />
                   </td>
+                  <td className="hide-mobile">
+                    <div className="skeleton-bar" style={{ width: '70px', height: '16px' }} />
+                  </td>
                 </tr>
               ))}
             </DataTable>
@@ -699,7 +716,7 @@ export default function ContactsPage() {
             </EmptyState>
           ) : (
             <>
-              <DataTable headers={['', 'Name', 'Email', 'Phone', 'Company', 'Segments']}>
+              <DataTable headers={['', 'Name', 'Email', 'Phone', 'Company', 'Segments', 'Last Engaged']}>
                 <tr>
                   <th style={{ width: '40px', padding: '0 var(--space-3)' }}>
                     <input
@@ -718,6 +735,7 @@ export default function ContactsPage() {
                   <th className="hide-mobile">Phone</th>
                   <th className="hide-mobile">Company</th>
                   <th className="hide-mobile">Segments</th>
+                  <th className="hide-mobile">Last Engaged</th>
                 </tr>
                 {displayContacts.map((c) => (
                   <tr key={c.contactId}>
@@ -744,6 +762,9 @@ export default function ContactsPage() {
                       <div className="flex gap-1 flex-wrap">
                         {c.segments.map((s) => <span key={s} className="badge badge-subtle">{s}</span>)}
                       </div>
+                    </td>
+                    <td className="text-tertiary hide-mobile" title={c.lastEngagedAt ? new Date(c.lastEngagedAt).toLocaleString() : undefined}>
+                      {lastEngagedHint(c.lastEngagedAt)}
                     </td>
                   </tr>
                 ))}

@@ -35,6 +35,13 @@ export interface ApiContact {
   updated_at: string;
   // Joined from suppression_list queries
   suppressions?: { channel: string; reason: string; created_at: string }[];
+  // Engagement rollups (may be absent on older rows)
+  total_sent?: number;
+  total_delivered?: number;
+  total_opened?: number;
+  total_clicked?: number;
+  last_sent_at?: string | null;
+  last_engaged_at?: string | null;
 }
 
 export interface ApiCampaign {
@@ -146,6 +153,12 @@ export function mapApiContact(row: ApiContact): Contact {
     consentSource: (row.consent_source as Contact['consentSource']) || undefined,
     customFields: row.custom_fields || undefined,
     createdAt: row.created_at,
+    totalSent: row.total_sent ?? 0,
+    totalDelivered: row.total_delivered ?? 0,
+    totalOpened: row.total_opened ?? 0,
+    totalClicked: row.total_clicked ?? 0,
+    lastSentAt: row.last_sent_at ?? null,
+    lastEngagedAt: row.last_engaged_at ?? null,
   };
 }
 

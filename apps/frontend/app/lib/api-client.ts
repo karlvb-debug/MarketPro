@@ -200,6 +200,11 @@ export const api = {
     list: (params?: { pageSize?: number; cursor?: string; search?: string; status?: string; segmentId?: string }) =>
       apiClient.get<ApiResponse<unknown[]>>(`/contacts${toQuery(params)}`),
     get: (id: string) => apiClient.get<unknown>(`/contacts/${id}`),
+    /** Unified, paginated per-contact activity history (campaign sends, consent, inbound) */
+    timeline: (id: string, params?: { cursor?: string | null; pageSize?: number }) =>
+      apiClient.get<ApiResponse<unknown[]>>(`/contacts/${id}/timeline${toQuery(params)}`),
+    /** Real per-channel consent state + evidence ledger (TCPA audit trail) */
+    consent: (id: string) => apiClient.get<unknown>(`/contacts/${id}/consent`),
     create: (data: unknown) => apiClient.post<unknown>('/contacts', data),
     update: (id: string, data: unknown) => apiClient.put<unknown>(`/contacts/${id}`, data),
     delete: (id: string) => apiClient.delete(`/contacts/${id}`),

@@ -66,6 +66,13 @@ export interface Contact {
   consentLog?: ConsentEvent[];
   customFields?: Record<string, string>;
   createdAt: string;
+  /** Engagement rollups (from the contact list/search rows). Default 0 / null for older rows. */
+  totalSent: number;
+  totalDelivered: number;
+  totalOpened: number;
+  totalClicked: number;
+  lastSentAt: string | null;
+  lastEngagedAt: string | null;
 }
 
 export interface Segment {
@@ -352,6 +359,13 @@ export interface RawContactRow {
   customFields?: Record<string, string>; custom_fields?: Record<string, string>;
   createdAt?: string; created_at?: string;
   updatedAt?: string; updated_at?: string;
+  // Engagement rollups (camelCase or snake_case; any may be missing on older rows)
+  totalSent?: number; total_sent?: number;
+  totalDelivered?: number; total_delivered?: number;
+  totalOpened?: number; total_opened?: number;
+  totalClicked?: number; total_clicked?: number;
+  lastSentAt?: string | null; last_sent_at?: string | null;
+  lastEngagedAt?: string | null; last_engaged_at?: string | null;
 }
 
 export interface RawCustomFieldRow {
@@ -375,6 +389,56 @@ export interface BatchLoadResponse {
     sms?: RawSmsTemplateRow[];
     voice?: RawVoiceScriptRow[];
   };
+}
+
+// ============================================
+// Per-contact timeline + consent contracts
+// (GET /contacts/{id}/timeline, GET /contacts/{id}/consent)
+// ============================================
+
+export type TimelineEventType = 'message' | 'consent' | 'inbound_sms' | 'inbound_email';
+
+export interface TimelineEvent {
+  type: TimelineEventType;
+  at: string;
+  // message
+  channel?: string;
+  status?: string;
+  campaignName?: string | null;
+  cost?: string | null;
+  // consent
+  consentType?: 'opt_in' | 'opt_out' | string;
+  consentChannel?: string;
+  source?: string | null;
+  // inbound_sms / inbound_email
+  body?: string | null;
+  fromAddress?: string | null;
+}
+
+export interface TimelineResponse {
+  data?: TimelineEvent[];
+  meta?: {
+    nextCursor?: string | null;
+    hasMore?: boolean;
+  };
+}
+
+export interface ConsentChannelState {
+  suppressed: boolean;
+  reason: string | null;
+}
+
+export interface ConsentLedgerEntry {
+  consentType: string;
+  channel: string;
+  source: string | null;
+  at: string;
+}
+
+export interface ConsentStateResponse {
+  email: ConsentChannelState;
+  phone: ConsentChannelState;
+  ledger: ConsentLedgerEntry[];
 }
 
 export interface ContactsListResponse {

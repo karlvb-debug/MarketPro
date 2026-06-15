@@ -30,7 +30,7 @@ interface ImportWizardProps {
   /** Workspace custom field definitions — archived fields are excluded from mapping */
   customFields?: CustomField[];
   importContacts: (
-    contacts: Omit<Contact, 'contactId' | 'createdAt' | 'compliance'>[]
+    contacts: Omit<Contact, 'contactId' | 'createdAt' | 'compliance' | 'totalSent' | 'totalDelivered' | 'totalOpened' | 'totalClicked' | 'lastSentAt' | 'lastEngagedAt'>[]
   ) => Promise<{ added: number; updated: number; skipped: number; blankSkipped?: number; serverError?: string | null }>;
   refreshContacts?: () => Promise<void>;
 }

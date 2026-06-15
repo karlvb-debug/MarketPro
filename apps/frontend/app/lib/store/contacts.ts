@@ -26,6 +26,11 @@ interface ContactsSliceDeps {
   setData: SetStoreData;
 }
 
+/** Server-derived engagement rollup fields — callers never set these directly. */
+type EngagementField =
+  | 'totalSent' | 'totalDelivered' | 'totalOpened' | 'totalClicked'
+  | 'lastSentAt' | 'lastEngagedAt';
+
 export interface ContactsFilter {
   search: string;
   segmentId: string | null;
@@ -110,6 +115,12 @@ export function useContactsSlice({ data, setData }: ContactsSliceDeps) {
             consentSource: row.consentSource || row.consent_source || undefined,
             customFields: row.customFields || row.custom_fields || undefined,
             createdAt: row.createdAt || row.created_at || new Date().toISOString(),
+            totalSent: row.totalSent ?? row.total_sent ?? 0,
+            totalDelivered: row.totalDelivered ?? row.total_delivered ?? 0,
+            totalOpened: row.totalOpened ?? row.total_opened ?? 0,
+            totalClicked: row.totalClicked ?? row.total_clicked ?? 0,
+            lastSentAt: row.lastSentAt ?? row.last_sent_at ?? null,
+            lastEngagedAt: row.lastEngagedAt ?? row.last_engaged_at ?? null,
           };
         });
 
@@ -133,7 +144,7 @@ export function useContactsSlice({ data, setData }: ContactsSliceDeps) {
   }, [contactsMeta.pageSize, contactsMeta.nextCursor, contactsFilter, setData]);
 
   // Create contact via API — returns error string on failure, null on success
-  const addContact = useCallback(async (contact: Omit<Contact, 'contactId' | 'createdAt' | 'status' | 'compliance'>): Promise<string | null> => {
+  const addContact = useCallback(async (contact: Omit<Contact, 'contactId' | 'createdAt' | 'status' | 'compliance' | EngagementField>): Promise<string | null> => {
     // Local duplicate check (fast pre-flight)
     if (contact.email) {
       const emailMatch = data.contacts.find(
@@ -159,6 +170,12 @@ export function useContactsSlice({ data, setData }: ContactsSliceDeps) {
       const row = await api.contacts.create(contactToApi(contact)) as RawContactRow;
       const realContactId = row.contactId || row.contact_id;
       const newContact: Contact = {
+        totalSent: 0,
+        totalDelivered: 0,
+        totalOpened: 0,
+        totalClicked: 0,
+        lastSentAt: null,
+        lastEngagedAt: null,
         ...contact,
         contactId: realContactId || crypto.randomUUID(),
         compliance: defaultCompliance(),
@@ -378,7 +395,7 @@ export function useContactsSlice({ data, setData }: ContactsSliceDeps) {
   // Returns counts plus `serverError` when persistence (partially) failed.
   // Local state is applied synchronously; the server upsert is awaited so
   // the caller can tell the user whether the import actually saved.
-  const importContacts = useCallback(async (newContacts: Omit<Contact, 'contactId' | 'createdAt' | 'compliance'>[]): Promise<{ added: number; updated: number; skipped: number; blankSkipped: number; serverError: string | null }> => {
+  const importContacts = useCallback(async (newContacts: Omit<Contact, 'contactId' | 'createdAt' | 'compliance' | EngagementField>[]): Promise<{ added: number; updated: number; skipped: number; blankSkipped: number; serverError: string | null }> => {
     if (importInFlightRef.current) {
       return { added: 0, updated: 0, skipped: 0, blankSkipped: 0, serverError: 'An import is already in progress — wait for it to finish.' };
     }
@@ -471,6 +488,12 @@ export function useContactsSlice({ data, setData }: ContactsSliceDeps) {
         if (phoneNorm) batchPhones.add(phoneNorm);
 
         const newContact: Contact = {
+          totalSent: 0,
+          totalDelivered: 0,
+          totalOpened: 0,
+          totalClicked: 0,
+          lastSentAt: null,
+          lastEngagedAt: null,
           ...c,
           contactId: crypto.randomUUID(),
           compliance: defaultCompliance(),

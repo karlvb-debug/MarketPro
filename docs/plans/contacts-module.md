@@ -1,6 +1,6 @@
 # Contacts Module — Deep Feature Plan
 
-> Status: C1 ✅ · C2 ✅ DONE (June 15, 2026) · C3–C5 planned · Created June 12, 2026
+> Status: C1 ✅ · C2 ✅ · C3 ✅ DONE (June 15, 2026) · C4–C5 planned · Created June 12, 2026
 > Goal: make contact management the strongest part of the product — typed
 > custom fields, rule-based dynamic segments, server-side filtering and
 > views, per-contact send history and consent evidence, dedup/merge, and
@@ -109,7 +109,7 @@ the rule engine can use them.*
 - Guardrails: rule depth ≤ 5, conditions ≤ 50, query timeout, EXPLAIN-based
   cost cap on preview for very large workspaces.
 
-### C3 — Send history, engagement & the contact timeline (~1 week)
+### C3 — Send history, engagement & the contact timeline (~1 week) — ✅ DONE
 
 - **Engagement rollups** (new columns on `contacts`, denormalized):
   `total_sent`, `total_delivered`, `total_opened`, `total_clicked`,
