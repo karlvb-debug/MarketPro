@@ -289,6 +289,13 @@ export class ApiStack extends cdk.Stack {
     const contactsSearchResource = contactsResource.addResource('search');
     contactsSearchResource.addMethod('POST', contactsIntegration, securedMethodOptions);
 
+    // /contacts/duplicates — duplicate clusters (C4)
+    contactsResource.addResource('duplicates').addMethod('GET', contactsIntegration, securedMethodOptions);
+    // /contacts/merge — fold duplicates into a survivor (C4)
+    contactsResource.addResource('merge').addMethod('POST', contactsIntegration, securedMethodOptions);
+    // /contacts/bulk — selection-aware bulk operations (C4)
+    contactsResource.addResource('bulk').addMethod('POST', contactsIntegration, securedMethodOptions);
+
     // /contacts/import-url — generate presigned s3 upload URL
     const contactsImportUrlResource = contactsResource.addResource('import-url');
     contactsImportUrlResource.addMethod('GET', contactsIntegration, securedMethodOptions);

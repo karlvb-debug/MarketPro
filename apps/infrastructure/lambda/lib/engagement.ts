@@ -11,6 +11,9 @@
 
 import { Pool } from 'pg';
 
+/** Pool or PoolClient — both expose a compatible query(). */
+type Queryable = Pick<Pool, 'query'>;
+
 type Stamp = 'delivered' | 'opened' | 'clicked';
 
 const STAMP_COLUMN: Record<Stamp, string> = {
@@ -53,6 +56,35 @@ export async function recordEngagement(pool: Pool, messageId: string, stamp: Sta
     [messageId],
   );
   return (result.rowCount ?? 0) > 0;
+}
+
+/**
+ * Recompute a contact's engagement rollups from campaign_messages — the
+ * source of truth. Used after merge repoints message rows. Uses the same
+ * definition as the 0004 backfill.
+ */
+export async function recomputeRollups(pool: Queryable, contactId: string): Promise<void> {
+  await pool.query(
+    `WITH r AS (
+       SELECT
+         COUNT(*) FILTER (WHERE sent_at IS NOT NULL OR status IN ('sent','delivered','opened','clicked')) AS sent,
+         COUNT(*) FILTER (WHERE delivered_at IS NOT NULL OR status IN ('delivered','opened','clicked')) AS delivered,
+         COUNT(*) FILTER (WHERE opened_at IS NOT NULL OR status IN ('opened','clicked')) AS opened,
+         COUNT(*) FILTER (WHERE clicked_at IS NOT NULL OR status = 'clicked') AS clicked,
+         MAX(sent_at) AS last_sent,
+         MAX(GREATEST(opened_at, clicked_at)) AS last_engaged
+       FROM campaign_messages WHERE contact_id = $1
+     )
+     UPDATE contacts c SET
+       total_sent = COALESCE(r.sent, 0),
+       total_delivered = COALESCE(r.delivered, 0),
+       total_opened = COALESCE(r.opened, 0),
+       total_clicked = COALESCE(r.clicked, 0),
+       last_sent_at = r.last_sent,
+       last_engaged_at = r.last_engaged
+     FROM r WHERE c.contact_id = $1`,
+    [contactId],
+  );
 }
 
 /**

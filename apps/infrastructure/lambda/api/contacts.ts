@@ -14,6 +14,9 @@ import { normalizeContactRow } from '../lib/contact-validate';
 import { loadFieldDefinitions, validateCustomFields, findUniqueViolations } from '../lib/custom-fields';
 import { parseRules, compileRules, RuleValidationError } from '../lib/rules';
 import { buildContactTimeline, getConsentState } from '../lib/timeline';
+import { findDuplicateClusters } from '../lib/duplicates';
+import { mergeContacts } from '../lib/merge';
+import { applyBulkAction, Selection, BulkAction } from '../lib/bulk';
 import { getDb, getPool, respond, getWorkspaceId, getUserId, requireRole, isSuperAdmin, methodToAction } from '../lib/db';
 import { contacts, adminAuditLog, segments, contactSegment, suppressionList } from '../../drizzle/schema';
 import * as crypto from 'crypto';
@@ -221,6 +224,55 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     // GET /contacts/{id}
+    // GET /contacts/duplicates — clusters of email/phone collisions
+    if (method === 'GET' && event.path?.endsWith('/duplicates')) {
+      const params = event.queryStringParameters || {};
+      const limit = parseInt(params.limit || '200', 10) || 200;
+      const clusters = await findDuplicateClusters(await getPool(), workspaceId, limit);
+      return respond(200, { data: clusters });
+    }
+
+    // POST /contacts/merge — fold duplicates into a survivor (admin only)
+    if (method === 'POST' && event.path?.endsWith('/merge')) {
+      const denied = requireRole(event, 'admin');
+      if (denied) return denied;
+      const body = JSON.parse(event.body || '{}');
+      const survivorId = body.survivorId || body.survivor_id;
+      const duplicateIds: string[] = body.duplicateIds || body.duplicate_ids || [];
+      if (!survivorId || !Array.isArray(duplicateIds) || duplicateIds.length === 0) {
+        return respond(400, { message: 'survivorId and a non-empty duplicateIds array are required' });
+      }
+      const result = await mergeContacts(await getPool(), workspaceId, survivorId, duplicateIds, userId);
+      if ('ok' in result && !result.ok) {
+        const status = result.reason === 'survivor_in_duplicates' ? 400 : 404;
+        return respond(status, { message: result.reason, ...('missing' in result ? { missing: result.missing } : {}) });
+      }
+      return respond(200, result);
+    }
+
+    // POST /contacts/bulk — selection-aware bulk action (editor; admin for delete)
+    if (method === 'POST' && event.path?.endsWith('/bulk')) {
+      const writeDenied = requireRole(event, 'editor');
+      if (writeDenied) return writeDenied;
+      const body = JSON.parse(event.body || '{}');
+      const action = body.action as BulkAction | undefined;
+      const selection = body.selection as Selection | undefined;
+      if (!action?.type || !selection) {
+        return respond(400, { message: 'action and selection are required' });
+      }
+      if (action.type === 'delete') {
+        const adminDenied = requireRole(event, 'admin');
+        if (adminDenied) return adminDenied;
+      }
+      try {
+        const result = await applyBulkAction(await getPool(), workspaceId, selection, action, userId);
+        return respond(200, result);
+      } catch (err) {
+        if (err instanceof RuleValidationError) return respond(400, { message: err.message });
+        throw err;
+      }
+    }
+
     // GET /contacts/{id}/timeline — unified activity history (paginated)
     if (method === 'GET' && pathId && event.path?.endsWith('/timeline')) {
       const params = event.queryStringParameters || {};
