@@ -2,6 +2,7 @@ import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import { getDb, getPool } from '../../lib/db';
 import { DEFAULT_CHANNEL_PRICES } from '../../lib/billing';
 import { buildMembershipClause, loadSegment, SegmentRow, MembershipClause } from '../../lib/segment-query';
+import { recordSent } from '../../lib/engagement';
 import {
   campaigns,
   contacts,
@@ -146,6 +147,10 @@ export async function createDispatchStore(): Promise<DispatchStore> {
     },
 
     async markSent(messageId, providerMessageId): Promise<void> {
+      // Bump the contact's total_sent/last_sent_at rollup the first time the
+      // message is sent (gated on sent_at IS NULL), then stamp the row. Order
+      // matters: recordSent must see sent_at NULL to count.
+      await recordSent(pool, messageId);
       await db
         .update(campaignMessages)
         .set({ status: 'sent', sentAt: new Date(), providerMessageId })

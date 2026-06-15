@@ -95,6 +95,13 @@ export const contacts = pgTable('contacts', {
   source: varchar('source', { length: 50 }),              // 'csv_import', 'api', 'manual'
   consentSource: consentSourceEnum('consent_source'),     // How consent was obtained
   customFields: jsonb('custom_fields').default({}),       // Flexible key-value for merge tags
+  // Engagement rollups (C3) — maintained by dispatch + the event pipeline
+  totalSent: integer('total_sent').notNull().default(0),
+  totalDelivered: integer('total_delivered').notNull().default(0),
+  totalOpened: integer('total_opened').notNull().default(0),
+  totalClicked: integer('total_clicked').notNull().default(0),
+  lastSentAt: timestamp('last_sent_at', { withTimezone: true }),
+  lastEngagedAt: timestamp('last_engaged_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (table) => ({

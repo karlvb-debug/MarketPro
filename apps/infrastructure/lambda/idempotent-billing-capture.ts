@@ -16,6 +16,7 @@ import { SQSEvent, SQSBatchResponse } from 'aws-lambda';
 
 import { getPool } from './lib/db';
 import { getChannelPrice, settleMessageCharge, Channel } from './lib/billing';
+import { recordEngagement } from './lib/engagement';
 import { Logger } from './lib/logger';
 
 export interface BillingEvent {
@@ -66,6 +67,14 @@ export function settlementKindOf(eventType: string): 'capture' | 'refund' | null
   return null;
 }
 
+/** Engagement rollup bucket for an event type, or null if not engagement. */
+export function engagementKindOf(eventType: string): 'delivered' | 'opened' | 'clicked' | null {
+  if (eventType === 'delivery' || eventType === 'delivered') return 'delivered';
+  if (eventType === 'open' || eventType === 'opened') return 'opened';
+  if (eventType === 'click' || eventType === 'clicked') return 'clicked';
+  return null;
+}
+
 export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
   const logger = new Logger({ handler: 'idempotent-billing-capture' });
   const batchItemFailures: { itemIdentifier: string }[] = [];
@@ -83,8 +92,9 @@ export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
 
       const { providerMessageId, workspaceId, eventType, recipientEmail } = billingEvent;
       const kind = settlementKindOf(eventType);
-      if (!kind) {
-        logger.info(`Ignoring non-billable event type '${eventType}'`, { providerMessageId });
+      const engagement = engagementKindOf(eventType);
+      if (!kind && !engagement) {
+        logger.info(`Ignoring event type '${eventType}'`, { providerMessageId });
         continue;
       }
 
@@ -129,28 +139,42 @@ export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
         continue;
       }
       const { message_id, campaign_id, channel, cost } = messageRow.rows[0];
-      const effectiveCost: string =
-        cost ?? (await getChannelPrice(pool, workspaceId, channel as Channel));
 
-      // 3. Settle against the campaign's authorization hold
-      await settleMessageCharge(pool, {
-        workspaceId,
-        campaignId: campaign_id,
-        cost: effectiveCost,
-        kind,
-      });
+      // 3. Settle billable events against the campaign's authorization hold
+      if (kind) {
+        const effectiveCost: string =
+          cost ?? (await getChannelPrice(pool, workspaceId, channel as Channel));
+        await settleMessageCharge(pool, {
+          workspaceId,
+          campaignId: campaign_id,
+          cost: effectiveCost,
+          kind,
+        });
 
-      // 4. Reflect the event on the message row
-      if (kind === 'capture') {
+        if (kind === 'refund') {
+          await pool.query(
+            `UPDATE campaign_messages SET status = 'bounced', error_code = $2 WHERE message_id = $1`,
+            [message_id, eventType],
+          );
+        }
+        eventLogger.info(`Billing ${kind} of ${effectiveCost} processed`);
+      }
+
+      // 4. Record engagement rollup (delivered/opened/clicked). Idempotent on
+      // the message's timestamp column, so duplicate events count once. Also
+      // advances the message status without regressing a more-engaged state.
+      if (engagement) {
+        await recordEngagement(pool, message_id, engagement);
+        const rank: Record<string, number> = { sent: 1, delivered: 2, opened: 3, clicked: 4 };
+        const newStatus = engagement; // 'delivered' | 'opened' | 'clicked'
         await pool.query(
-          `UPDATE campaign_messages SET status = 'delivered', delivered_at = NOW() WHERE message_id = $1`,
-          [message_id],
+          `UPDATE campaign_messages
+              SET status = $2
+            WHERE message_id = $1
+              AND COALESCE(($3::jsonb ->> status::text)::int, 0) < $4`,
+          [message_id, newStatus, JSON.stringify(rank), rank[newStatus]],
         );
-      } else {
-        await pool.query(
-          `UPDATE campaign_messages SET status = 'bounced', error_code = $2 WHERE message_id = $1`,
-          [message_id, eventType],
-        );
+        eventLogger.info(`Engagement '${engagement}' recorded`);
       }
 
       // 5. Suppress bounced/complained recipients
@@ -163,8 +187,6 @@ export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
           [workspaceId, emailHash, eventType],
         );
       }
-
-      eventLogger.info(`Billing ${kind} of ${effectiveCost} processed`);
     } catch (err) {
       logger.error('Failed to process billing record — returning to queue', err, {
         sqsMessageId: record.messageId,

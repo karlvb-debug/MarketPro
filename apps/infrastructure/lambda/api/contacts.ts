@@ -13,6 +13,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { normalizeContactRow } from '../lib/contact-validate';
 import { loadFieldDefinitions, validateCustomFields, findUniqueViolations } from '../lib/custom-fields';
 import { parseRules, compileRules, RuleValidationError } from '../lib/rules';
+import { buildContactTimeline, getConsentState } from '../lib/timeline';
 import { getDb, getPool, respond, getWorkspaceId, getUserId, requireRole, isSuperAdmin, methodToAction } from '../lib/db';
 import { contacts, adminAuditLog, segments, contactSegment, suppressionList } from '../../drizzle/schema';
 import * as crypto from 'crypto';
@@ -220,6 +221,21 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     // GET /contacts/{id}
+    // GET /contacts/{id}/timeline — unified activity history (paginated)
+    if (method === 'GET' && pathId && event.path?.endsWith('/timeline')) {
+      const params = event.queryStringParameters || {};
+      const limit = Math.min(100, parseInt(params.pageSize || '30', 10) || 30);
+      const cursor = params.cursor?.trim() || null;
+      const page = await buildContactTimeline(await getPool(), workspaceId, pathId, cursor, limit);
+      return respond(200, { data: page.events, meta: { nextCursor: page.nextCursor, hasMore: page.hasMore } });
+    }
+
+    // GET /contacts/{id}/consent — real per-channel consent + evidence ledger
+    if (method === 'GET' && pathId && event.path?.endsWith('/consent')) {
+      const state = await getConsentState(await getPool(), workspaceId, pathId);
+      return respond(200, state);
+    }
+
     if (method === 'GET' && pathId) {
       const [row] = await db
         .select()

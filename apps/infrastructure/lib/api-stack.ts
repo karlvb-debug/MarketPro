@@ -302,6 +302,11 @@ export class ApiStack extends cdk.Stack {
     const contactForgetResource = contactIdResource.addResource('forget');
     contactForgetResource.addMethod('POST', new apigateway.LambdaIntegration(forgetLambda), securedMethodOptions);
 
+    // /contacts/{id}/timeline — unified activity history
+    contactIdResource.addResource('timeline').addMethod('GET', contactsIntegration, securedMethodOptions);
+    // /contacts/{id}/consent — real per-channel consent + evidence ledger
+    contactIdResource.addResource('consent').addMethod('GET', contactsIntegration, securedMethodOptions);
+
     // ---- /segments ----
     const segmentsResource = this.api.root.addResource('segments');
     const segmentsIntegration = new apigateway.LambdaIntegration(segmentsLambda);

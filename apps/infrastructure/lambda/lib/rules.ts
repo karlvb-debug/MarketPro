@@ -62,6 +62,13 @@ const CORE_FIELDS: Record<string, FieldDef> = {
   },
   created_at: { type: 'date', expr: 'c.created_at' },
   updated_at: { type: 'date', expr: 'c.updated_at' },
+  // Engagement rollups (C3) — enable "opened in last 30 days" style segments
+  total_sent: { type: 'number', expr: 'c.total_sent' },
+  total_delivered: { type: 'number', expr: 'c.total_delivered' },
+  total_opened: { type: 'number', expr: 'c.total_opened' },
+  total_clicked: { type: 'number', expr: 'c.total_clicked' },
+  last_sent_at: { type: 'date', expr: 'c.last_sent_at' },
+  last_engaged_at: { type: 'date', expr: 'c.last_engaged_at' },
   // Membership pseudo-fields (value = segment uuid); compiled as EXISTS
   in_segment: { type: 'text', expr: '__segment__' },
   not_in_segment: { type: 'text', expr: '__segment__' },
