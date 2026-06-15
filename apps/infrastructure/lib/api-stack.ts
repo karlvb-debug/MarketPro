@@ -128,6 +128,23 @@ export class ApiStack extends cdk.Stack {
     });
     props.dbSecret.grantRead(workspacesLambda);
 
+    // Async contact-export worker (streams matching contacts to CSV in S3).
+    const exportWorkerLambda = new lambdaNodejs.NodejsFunction(this, 'ExportWorkerFunction', {
+      ...commonLambdaProps,
+      entry: path.join(__dirname, '../lambda/export-worker.ts'),
+      handler: 'handler',
+      timeout: cdk.Duration.minutes(15), // large exports stream within one invocation
+      memorySize: 512,
+      environment: {
+        ...commonLambdaProps.environment,
+        EXPORT_BUCKET: props.uploadBucket?.bucketName || '',
+      },
+    });
+    props.dbSecret.grantRead(exportWorkerLambda);
+    if (props.uploadBucket) {
+      props.uploadBucket.grantReadWrite(exportWorkerLambda);
+    }
+
     const contactsLambda = new lambdaNodejs.NodejsFunction(this, 'ContactsFunction', {
       ...commonLambdaProps,
       entry: path.join(__dirname, '../lambda/api/contacts.ts'),
@@ -137,12 +154,24 @@ export class ApiStack extends cdk.Stack {
       environment: {
         ...commonLambdaProps.environment,
         UPLOAD_BUCKET: props.uploadBucket?.bucketName || '',
+        EXPORT_BUCKET: props.uploadBucket?.bucketName || '',
+        EXPORT_WORKER_FUNCTION: exportWorkerLambda.functionName,
       },
     });
     props.dbSecret.grantRead(contactsLambda);
     if (props.uploadBucket) {
       props.uploadBucket.grantPut(contactsLambda);
+      props.uploadBucket.grantRead(contactsLambda); // presign export downloads
     }
+    exportWorkerLambda.grantInvoke(contactsLambda);
+
+    // Saved views (per-user, workspace-syncable)
+    const viewsLambda = new lambdaNodejs.NodejsFunction(this, 'ViewsFunction', {
+      ...commonLambdaProps,
+      entry: path.join(__dirname, '../lambda/api/views.ts'),
+      handler: 'handler',
+    });
+    props.dbSecret.grantRead(viewsLambda);
 
     const segmentsLambda = new lambdaNodejs.NodejsFunction(this, 'SegmentsFunction', {
       ...commonLambdaProps,
@@ -295,6 +324,10 @@ export class ApiStack extends cdk.Stack {
     contactsResource.addResource('merge').addMethod('POST', contactsIntegration, securedMethodOptions);
     // /contacts/bulk — selection-aware bulk operations (C4)
     contactsResource.addResource('bulk').addMethod('POST', contactsIntegration, securedMethodOptions);
+    // /contacts/export — async CSV export (C5); /contacts/export/{id} — job status
+    const contactsExportResource = contactsResource.addResource('export');
+    contactsExportResource.addMethod('POST', contactsIntegration, securedMethodOptions);
+    contactsExportResource.addResource('{id}').addMethod('GET', contactsIntegration, securedMethodOptions);
 
     // /contacts/import-url — generate presigned s3 upload URL
     const contactsImportUrlResource = contactsResource.addResource('import-url');
@@ -366,6 +399,15 @@ export class ApiStack extends cdk.Stack {
     const customFieldIdResource = customFieldsResource.addResource('{id}');
     customFieldIdResource.addMethod('PUT', customFieldsIntegration, securedMethodOptions);
     customFieldIdResource.addMethod('DELETE', customFieldsIntegration, securedMethodOptions);
+
+    // ---- /views (saved filter/column state) ----
+    const viewsResource = this.api.root.addResource('views');
+    const viewsIntegration = new apigateway.LambdaIntegration(viewsLambda);
+    viewsResource.addMethod('GET', viewsIntegration, securedMethodOptions);
+    viewsResource.addMethod('POST', viewsIntegration, securedMethodOptions);
+    const viewIdResource = viewsResource.addResource('{id}');
+    viewIdResource.addMethod('PUT', viewsIntegration, securedMethodOptions);
+    viewIdResource.addMethod('DELETE', viewsIntegration, securedMethodOptions);
 
     // ---- /batch (single call for all workspace data) ----
     const batchResource = this.api.root.addResource('batch');

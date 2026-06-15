@@ -14,6 +14,7 @@ import * as customFields from './0002-custom-fields-and-filter-indexes';
 import * as dynamicSegments from './0003-dynamic-segments';
 import * as engagementRollups from './0004-engagement-rollups';
 import * as mergeLog from './0005-contact-merge-log';
+import * as viewsExport from './0006-views-and-export-jobs';
 
 export interface Migration {
   id: string;
@@ -26,4 +27,5 @@ export const MIGRATIONS: Migration[] = [
   { id: dynamicSegments.id, sql: dynamicSegments.sql },
   { id: engagementRollups.id, sql: engagementRollups.sql },
   { id: mergeLog.id, sql: mergeLog.sql },
+  { id: viewsExport.id, sql: viewsExport.sql },
 ];

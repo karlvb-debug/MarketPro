@@ -10,7 +10,9 @@ import { Pool } from 'pg';
 import { compileRules, parseRules, RuleValidationError } from './rules';
 import { loadFieldDefinitions, validateCustomFields } from './custom-fields';
 
-export type Selection = { contactIds: string[] } | { rules: unknown };
+// { all: true } is an explicit "every contact in the workspace" — opt-in so
+// it can't happen by accident (e.g. an empty rule group).
+export type Selection = { contactIds: string[] } | { rules: unknown } | { all: true };
 
 export interface SelectionClause {
   text: string;
@@ -23,15 +25,21 @@ export async function buildSelectionClause(
   workspaceId: string,
   selection: Selection,
 ): Promise<SelectionClause> {
+  if ('all' in selection && selection.all === true) {
+    return { text: 'TRUE', params: [] };
+  }
   if ('contactIds' in selection) {
     const ids = Array.isArray(selection.contactIds) ? selection.contactIds : [];
     if (ids.length === 0) throw new RuleValidationError('contactIds must be a non-empty array');
     if (ids.length > 10000) throw new RuleValidationError('contactIds exceeds the 10,000 limit');
     return { text: 'c.contact_id = ANY($2::uuid[])', params: [ids] };
   }
-  const defs = (await loadFieldDefinitions(pool, workspaceId)).filter((d) => !d.archived);
-  const compiled = compileRules(parseRules(selection.rules), defs, 1);
-  return { text: compiled.text, params: compiled.params };
+  if ('rules' in selection) {
+    const defs = (await loadFieldDefinitions(pool, workspaceId)).filter((d) => !d.archived);
+    const compiled = compileRules(parseRules(selection.rules), defs, 1);
+    return { text: compiled.text, params: compiled.params };
+  }
+  throw new RuleValidationError('selection must specify contactIds, rules, or all');
 }
 
 export type BulkAction =

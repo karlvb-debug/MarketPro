@@ -8,7 +8,7 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { eq, ne, and, or, ilike, sql, inArray } from 'drizzle-orm';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { normalizeContactRow } from '../lib/contact-validate';
 import { loadFieldDefinitions, validateCustomFields, findUniqueViolations } from '../lib/custom-fields';
@@ -16,7 +16,7 @@ import { parseRules, compileRules, RuleValidationError } from '../lib/rules';
 import { buildContactTimeline, getConsentState } from '../lib/timeline';
 import { findDuplicateClusters } from '../lib/duplicates';
 import { mergeContacts } from '../lib/merge';
-import { applyBulkAction, Selection, BulkAction } from '../lib/bulk';
+import { applyBulkAction, Selection, BulkAction, buildSelectionClause } from '../lib/bulk';
 import { getDb, getPool, respond, getWorkspaceId, getUserId, requireRole, isSuperAdmin, methodToAction } from '../lib/db';
 import { contacts, adminAuditLog, segments, contactSegment, suppressionList } from '../../drizzle/schema';
 import * as crypto from 'crypto';
@@ -271,6 +271,62 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         if (err instanceof RuleValidationError) return respond(400, { message: err.message });
         throw err;
       }
+    }
+
+    // POST /contacts/export — start an async CSV export of the selection
+    if (method === 'POST' && event.path?.endsWith('/export')) {
+      const writeDenied = requireRole(event, 'viewer');
+      if (writeDenied) return writeDenied;
+      const body = JSON.parse(event.body || '{}');
+      const selection = (body.selection ?? { all: true }) as Selection;
+      const columns = Array.isArray(body.columns) ? body.columns : null;
+
+      const pool = await getPool();
+      // Validate the selection compiles before enqueuing (fail fast with 400).
+      try {
+        await buildSelectionClause(pool, workspaceId, selection);
+      } catch (err) {
+        if (err instanceof RuleValidationError) return respond(400, { message: `Invalid selection: ${err.message}` });
+        throw err;
+      }
+
+      const job = await pool.query(
+        `INSERT INTO export_jobs (workspace_id, requested_by, status, selection, columns)
+         VALUES ($1, $2, 'pending', $3, $4) RETURNING job_id`,
+        [workspaceId, userId, JSON.stringify(selection), columns ? JSON.stringify(columns) : null],
+      );
+      const jobId = job.rows[0].job_id;
+
+      // Fire the worker asynchronously (Event invocation); return immediately.
+      const fnName = process.env.EXPORT_WORKER_FUNCTION;
+      if (fnName) {
+        const { LambdaClient, InvokeCommand } = await import('@aws-sdk/client-lambda');
+        const lambdaClient = new LambdaClient({});
+        await lambdaClient.send(new InvokeCommand({
+          FunctionName: fnName,
+          InvocationType: 'Event',
+          Payload: Buffer.from(JSON.stringify({ jobId, workspaceId })),
+        }));
+      }
+      return respond(202, { jobId, status: 'pending' });
+    }
+
+    // GET /contacts/export/{id} — export job status + presigned download URL
+    if (method === 'GET' && pathId && event.path?.includes('/export/')) {
+      const pool = await getPool();
+      const job = await pool.query(
+        `SELECT status::text AS status, row_count, s3_key, error FROM export_jobs
+          WHERE job_id = $1 AND workspace_id = $2`,
+        [pathId, workspaceId],
+      );
+      if (job.rows.length === 0) return respond(404, { message: 'Export job not found' });
+      const row = job.rows[0];
+      let downloadUrl: string | null = null;
+      if (row.status === 'complete' && row.s3_key && process.env.EXPORT_BUCKET) {
+        const command = new GetObjectCommand({ Bucket: process.env.EXPORT_BUCKET, Key: row.s3_key });
+        downloadUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 });
+      }
+      return respond(200, { status: row.status, rowCount: row.row_count, error: row.error, downloadUrl });
     }
 
     // GET /contacts/{id}/timeline — unified activity history (paginated)
