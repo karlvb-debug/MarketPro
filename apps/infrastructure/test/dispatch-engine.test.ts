@@ -308,6 +308,117 @@ describe('processCampaignDispatch', () => {
   });
 });
 
+describe('processCampaignDispatch — continuation & quiet-hours self-heal', () => {
+  type Requeued = { payload: Record<string, unknown>; delay: number };
+
+  test('re-enqueues a cursor continuation when the time budget runs out, without completing', async () => {
+    const store = new InMemoryStore();
+    store.contacts = Array.from({ length: PAGE_SIZE * 2 }, (_, i) => makeContact(i));
+    const adapter = makeAdapter();
+    const requeued: Requeued[] = [];
+    // Time budget already exhausted — stop after the first page (the check
+    // runs after each page is sent).
+    const timeRemainingMs = () => 0;
+
+    await processCampaignDispatch(payload, store, adapter, logger, {
+      requeue: async (p, delay) => { requeued.push({ payload: p, delay }); },
+      timeRemainingMs,
+    });
+
+    expect(store.completedCount).toBeNull(); // did NOT complete
+    expect(requeued).toHaveLength(1);
+    expect(requeued[0]!.delay).toBe(0);
+    expect(requeued[0]!.payload.afterContactId).toBe(makeContact(PAGE_SIZE - 1).contactId);
+    expect(adapter.sendAttempts).toHaveLength(PAGE_SIZE); // only the first page sent
+  });
+
+  test('a continuation resumes from afterContactId and completes', async () => {
+    const store = new InMemoryStore();
+    store.contacts = Array.from({ length: 5 }, (_, i) => makeContact(i));
+    // First three already claimed+sent in a prior invocation.
+    for (let i = 0; i < 3; i++) {
+      await store.claimRecipients({} as DispatchCampaign, 'email', 'f', [makeContact(i)], '0.01');
+    }
+    const adapter = makeAdapter();
+    const resumePayload = JSON.stringify({
+      campaignId: 'camp-1', workspaceId: 'ws-1', afterContactId: makeContact(2).contactId,
+    });
+
+    await processCampaignDispatch(resumePayload, store, adapter, logger, {
+      requeue: async () => {},
+      timeRemainingMs: () => 1_000_000,
+    });
+
+    // Only the unclaimed tail (3,4) is sent; campaign completes.
+    expect(adapter.sendAttempts.sort()).toEqual([makeContact(3).contactId, makeContact(4).contactId]);
+    expect(store.completedCount).toBe(5);
+  });
+
+  test('quiet-hours deferrals schedule a delayed full rescan instead of completing', async () => {
+    const store = new InMemoryStore();
+    store.contacts = [makeContact(1), makeContact(2)];
+    const adapter = makeAdapter();
+    adapter.skipReasonOf = (c) => (c.contactId === makeContact(1).contactId ? 'quiet_hours' : null);
+    const requeued: Requeued[] = [];
+
+    await processCampaignDispatch(payload, store, adapter, logger, {
+      requeue: async (p, delay) => { requeued.push({ payload: p, delay }); },
+      timeRemainingMs: () => 1_000_000,
+    });
+
+    expect(adapter.sendAttempts).toEqual([makeContact(2).contactId]); // in-window one sent
+    expect(store.completedCount).toBeNull(); // deferred, not complete
+    expect(requeued).toHaveLength(1);
+    expect(requeued[0]!.delay).toBe(900);
+    expect(requeued[0]!.payload.requeueCount).toBe(1);
+    expect(requeued[0]!.payload.afterContactId ?? null).toBeNull(); // full rescan
+  });
+
+  test('rescan with everyone in-window completes and stops re-queueing', async () => {
+    const store = new InMemoryStore();
+    store.contacts = [makeContact(1), makeContact(2)];
+    const adapter = makeAdapter(); // no skipReasonOf → nobody deferred
+    const requeued: Requeued[] = [];
+
+    await processCampaignDispatch(
+      JSON.stringify({ campaignId: 'camp-1', workspaceId: 'ws-1', requeueCount: 1 }),
+      store, adapter, logger,
+      { requeue: async (p, delay) => { requeued.push({ payload: p, delay }); }, timeRemainingMs: () => 1_000_000 },
+    );
+
+    expect(requeued).toHaveLength(0);
+    expect(store.completedCount).toBe(2);
+  });
+
+  test('deferrals stop re-queueing at the safety cap and complete', async () => {
+    const store = new InMemoryStore();
+    store.contacts = [makeContact(1)];
+    const adapter = makeAdapter();
+    adapter.skipReasonOf = () => 'quiet_hours';
+    const requeued: Requeued[] = [];
+
+    await processCampaignDispatch(
+      JSON.stringify({ campaignId: 'camp-1', workspaceId: 'ws-1', requeueCount: 100 }),
+      store, adapter, logger,
+      { requeue: async (p, delay) => { requeued.push({ payload: p, delay }); }, timeRemainingMs: () => 1_000_000 },
+    );
+
+    expect(requeued).toHaveLength(0); // cap reached
+    expect(store.completedCount).toBe(0); // completed (nobody sendable, but no longer pending)
+  });
+
+  test('without a requeue fn (default), behavior is unchanged — completes immediately', async () => {
+    const store = new InMemoryStore();
+    store.contacts = [makeContact(1)];
+    const adapter = makeAdapter();
+    adapter.skipReasonOf = () => 'quiet_hours';
+
+    await processCampaignDispatch(payload, store, adapter, logger); // no options
+
+    expect(store.completedCount).toBe(0); // legacy behavior: complete despite deferral
+  });
+});
+
 describe('makeSqsHandler', () => {
   function sqsEvent(...bodies: string[]): SQSEvent {
     return {

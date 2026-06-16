@@ -102,6 +102,7 @@ export class SmsStack extends cdk.Stack {
         DATABASE_SECRET_ARN: props.dbSecret.secretArn,
         DATABASE_HOST: props.database.instanceEndpoint.hostname,
         DATABASE_NAME: 'marketingsaas',
+        DISPATCH_QUEUE_URL: this.smsDispatchQueue.queueUrl,
       },
       bundling: {
         externalModules: ['@aws-sdk/*'],
@@ -111,6 +112,7 @@ export class SmsStack extends cdk.Stack {
     // 5. Grant permissions
     props.dbSecret.grantRead(dispatchLambda);
     this.smsDispatchQueue.grantConsumeMessages(dispatchLambda);
+    this.smsDispatchQueue.grantSendMessages(dispatchLambda); // continuations
     
     // Grant AWS End User Messaging SMS v2 sending permissions
     dispatchLambda.addToRolePolicy(new cdk.aws_iam.PolicyStatement({

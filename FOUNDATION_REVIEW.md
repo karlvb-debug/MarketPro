@@ -169,6 +169,15 @@ Gating rules worth enforcing:
 
 ---
 
+## 4b. Pre-beta dispatch reliability — ✅ DONE (June 16, 2026)
+
+The two send-path gaps flagged in the scheduling/batching review, both gating real production sends:
+
+- [x] **Continuation re-queueing** — the dispatch engine now re-enqueues a cursor-carrying continuation to its own queue when the invocation nears its time budget (`getRemainingTimeInMillis`), instead of relying on SQS visibility-timeout redelivery (which capped a campaign at ~3 invocations before the DLQ). Removes the per-campaign throughput ceiling; claims keep it exactly-once across continuations. Each channel queue grants the dispatch Lambda send + `DISPATCH_QUEUE_URL`.
+- [x] **Quiet-hours self-healing** — recipients skipped for TCPA quiet hours are tracked across the whole pass (via the payload, surviving time-budget continuations) and trigger a delayed (15-min) full rescan that stays in `sending` until every timezone enters the window, capped at 100 retries (~25h) as a safety net. Previously these recipients were silently dropped and the campaign marked complete.
+
+8 new engine tests (continuation cursor hand-off + resume, quiet-hours deferral/rescan/cap, legacy no-requeue behavior preserved). 152 infra tests total.
+
 ## 5. Bottom line
 
 The hard architectural decisions here are already made, and made well — tenant isolation, queue-based dispatch, double-entry billing, and single-system-of-record are the right shape for this product. What's missing is not design but **verification and follow-through**: stubs presented as done, no tests, no pipeline, and reliability gaps in exactly the code paths (dispatch, billing, deletion) where failures are unrecoverable. Roughly 2–3 months of disciplined hardening turns this from a promising prototype into a foundation you can build a business on.

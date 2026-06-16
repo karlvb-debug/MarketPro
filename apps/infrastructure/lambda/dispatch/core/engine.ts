@@ -1,31 +1,62 @@
-import { SQSEvent, SQSBatchResponse } from 'aws-lambda';
+import { SQSEvent, SQSBatchResponse, Context } from 'aws-lambda';
 import { Logger } from '../../lib/logger';
 import { isRetryableError } from './errors';
 import { ChannelAdapter, DispatchStore } from './types';
 
 export const PAGE_SIZE = 500;
 
+// Leave headroom before the Lambda timeout to re-enqueue a continuation.
+const TIME_BUFFER_MS = 30_000;
+// Quiet-hours deferrals are retried on a delay (SQS max) until the window opens.
+const QUIET_HOURS_RETRY_DELAY_S = 900;
+// Safety cap (~25h at 15-min spacing) so a pathological deferral can't loop forever.
+const MAX_QUIET_HOURS_REQUEUE = 100;
+
+export interface DispatchPayload {
+  campaignId?: string;
+  workspaceId?: string;
+  /** Keyset cursor for time-budget continuations (same pass, split across invocations). */
+  afterContactId?: string | null;
+  /** Number of quiet-hours full-rescan retries so far. */
+  requeueCount?: number;
+  /** True if any recipient was deferred (quiet hours) earlier in this pass. */
+  deferredAny?: boolean;
+}
+
+export interface DispatchOptions {
+  /** Re-enqueue a follow-up dispatch message to this channel's own queue. */
+  requeue?: (payload: DispatchPayload, delaySeconds: number) => Promise<void>;
+  /** Milliseconds left before the Lambda times out (default: unbounded). */
+  timeRemainingMs?: () => number;
+}
+
 /**
- * Process one campaign-dispatch payload end to end.
+ * Process one campaign-dispatch payload.
  *
  * Guarantees:
  * - Memory-safe: contacts are keyset-paginated, suppression checked per page.
  * - At-most-once per recipient: a unique (campaign_id, contact_id) claim row
- *   is inserted before sending; redelivered SQS records skip claimed rows.
- * - Resumable: an interrupted run picks up at the first unclaimed contact.
+ *   is inserted before sending; redelivered/continued records skip claimed rows.
+ * - No per-campaign size ceiling: when the invocation nears its time budget it
+ *   re-enqueues a continuation carrying the cursor, instead of relying on
+ *   SQS visibility-timeout redelivery (which would hit maxReceiveCount → DLQ).
+ * - Quiet-hours self-healing: recipients skipped for TCPA quiet hours are not
+ *   claimed; if any were deferred, the campaign re-enqueues a full rescan on a
+ *   delay and stays 'sending' until the window opens and everyone is reached.
  * - Error triage: systemic errors propagate (SQS retry → DLQ); per-recipient
  *   errors are recorded on the message row and the campaign continues.
- *
- * Throws only for retryable conditions; config/data problems are terminal and
- * resolve the campaign (cancelled) instead of poisoning the queue.
  */
 export async function processCampaignDispatch<TTemplate, TSetup>(
   body: string,
   store: DispatchStore,
   adapter: ChannelAdapter<TTemplate, TSetup>,
   baseLogger: Logger,
+  options: DispatchOptions = {},
 ): Promise<void> {
-  let payload: { campaignId?: string; workspaceId?: string };
+  const requeue = options.requeue;
+  const timeRemainingMs = options.timeRemainingMs ?? (() => Number.POSITIVE_INFINITY);
+
+  let payload: DispatchPayload;
   try {
     payload = JSON.parse(body);
   } catch {
@@ -38,6 +69,7 @@ export async function processCampaignDispatch<TTemplate, TSetup>(
     baseLogger.error('Poison pill: payload missing campaignId/workspaceId', undefined, { payload });
     return;
   }
+  const requeueCount = payload.requeueCount ?? 0;
 
   const logger = baseLogger.with({ campaignId, workspaceId, channel: adapter.channel });
 
@@ -76,7 +108,10 @@ export async function processCampaignDispatch<TTemplate, TSetup>(
   let skippedSuppressed = 0;
   let skippedAlreadyClaimed = 0;
   let skippedCompliance = 0;
-  let cursor: string | null = null;
+  // Tracks quiet-hours deferrals across the whole pass (survives time-budget
+  // continuations via the payload) so the final invocation knows to retry.
+  let deferredAny = payload.deferredAny ?? false;
+  let cursor: string | null = payload.afterContactId ?? null;
 
   for (;;) {
     const page = await store.fetchContactsPage(workspaceId, campaign.segmentId, cursor, PAGE_SIZE);
@@ -85,14 +120,14 @@ export async function processCampaignDispatch<TTemplate, TSetup>(
 
     let reachable = page.filter((c) => adapter.recipientOf(c));
 
-    // Compliance gate (e.g. TCPA quiet hours). Skipped contacts are not
-    // claimed: re-queueing the campaign during allowed hours reaches them.
+    // Compliance gate (e.g. TCPA quiet hours). Skipped contacts are NOT
+    // claimed; a later full rescan (scheduled below) reaches them in-window.
     if (adapter.skipReasonOf) {
       const now = new Date();
       const allowed: typeof reachable = [];
       for (const contact of reachable) {
         const reason = adapter.skipReasonOf(contact, now);
-        if (reason) skippedCompliance++;
+        if (reason) { skippedCompliance++; deferredAny = true; }
         else allowed.push(contact);
       }
       reachable = allowed;
@@ -130,7 +165,28 @@ export async function processCampaignDispatch<TTemplate, TSetup>(
       }
     }
 
-    if (page.length < PAGE_SIZE) break;
+    const morePages = page.length >= PAGE_SIZE;
+
+    // Time-budget continuation: hand off the rest of THIS pass (same cursor,
+    // same requeueCount) to a fresh invocation rather than risk a timeout.
+    if (morePages && requeue && timeRemainingMs() < TIME_BUFFER_MS) {
+      await requeue({ campaignId, workspaceId, afterContactId: cursor, requeueCount, deferredAny }, 0);
+      logger.info('Time budget reached — continuation enqueued', { sent, failed, afterContactId: cursor });
+      return;
+    }
+
+    if (!morePages) break;
+  }
+
+  // Quiet-hours self-heal: if anyone was deferred this pass, retry the whole
+  // segment on a delay (claims make the rescan cheap) until the window opens.
+  if (deferredAny && requeue && requeueCount < MAX_QUIET_HOURS_REQUEUE) {
+    await requeue(
+      { campaignId, workspaceId, requeueCount: requeueCount + 1, deferredAny: false },
+      QUIET_HOURS_RETRY_DELAY_S,
+    );
+    logger.info('Quiet-hours deferrals — rescan scheduled', { sent, skippedCompliance, requeueCount: requeueCount + 1 });
+    return;
   }
 
   const totalRecipients = await store.completeCampaign(campaignId);
@@ -141,27 +197,46 @@ export async function processCampaignDispatch<TTemplate, TSetup>(
     skippedAlreadyClaimed,
     skippedCompliance,
     totalRecipients,
+    unreachedDeferrals: deferredAny && requeueCount >= MAX_QUIET_HOURS_REQUEUE,
   });
 }
 
 /**
- * SQS handler wrapper: processes each record independently and reports
- * partial batch failures so only retryable records are redelivered.
- * Requires reportBatchItemFailures on the event source mapping.
+ * SQS handler wrapper: processes each record independently, reports partial
+ * batch failures (so only retryable records are redelivered), and gives the
+ * engine a self-requeue + time budget for continuations. Requires
+ * reportBatchItemFailures on the event source mapping and DISPATCH_QUEUE_URL
+ * in the environment for continuations to be enqueued.
  */
 export function makeSqsHandler<TTemplate, TSetup>(
   getStore: () => Promise<DispatchStore>,
   adapter: ChannelAdapter<TTemplate, TSetup>,
-): (event: SQSEvent) => Promise<SQSBatchResponse> {
-  return async (event: SQSEvent): Promise<SQSBatchResponse> => {
+): (event: SQSEvent, context?: Context) => Promise<SQSBatchResponse> {
+  return async (event: SQSEvent, context?: Context): Promise<SQSBatchResponse> => {
     const logger = new Logger({ handler: `dispatch-${adapter.channel}` });
     const batchItemFailures: { itemIdentifier: string }[] = [];
 
     const store = await getStore();
+    const queueUrl = process.env.DISPATCH_QUEUE_URL;
+
+    // Self-requeue via the channel's own queue (lazy SQS client).
+    let requeue: DispatchOptions['requeue'];
+    if (queueUrl) {
+      requeue = async (payload, delaySeconds) => {
+        const { SQSClient, SendMessageCommand } = await import('@aws-sdk/client-sqs');
+        const sqs = new SQSClient({});
+        await sqs.send(new SendMessageCommand({
+          QueueUrl: queueUrl,
+          MessageBody: JSON.stringify(payload),
+          DelaySeconds: Math.min(900, Math.max(0, Math.floor(delaySeconds))),
+        }));
+      };
+    }
+    const timeRemainingMs = context ? () => context.getRemainingTimeInMillis() : undefined;
 
     for (const record of event.Records) {
       try {
-        await processCampaignDispatch(record.body, store, adapter, logger);
+        await processCampaignDispatch(record.body, store, adapter, logger, { requeue, timeRemainingMs });
       } catch (err) {
         if (isRetryableError(err)) {
           logger.error('Retryable dispatch failure — returning record to queue', err, {

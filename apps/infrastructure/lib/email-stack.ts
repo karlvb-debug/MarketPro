@@ -112,6 +112,7 @@ export class EmailStack extends cdk.Stack {
           DATABASE_HOST: props.database.instanceEndpoint.hostname,
           DATABASE_NAME: "marketingsaas",
           UNSUBSCRIBE_BASE_URL: unsubscribeUrl,
+          DISPATCH_QUEUE_URL: this.emailDispatchQueue.queueUrl,
         },
         bundling: {
           externalModules: ["@aws-sdk/*"],
@@ -122,6 +123,7 @@ export class EmailStack extends cdk.Stack {
     // 3. Grant permissions
     props.dbSecret.grantRead(dispatchLambda);
     this.emailDispatchQueue.grantConsumeMessages(dispatchLambda);
+    this.emailDispatchQueue.grantSendMessages(dispatchLambda); // continuations
 
     // Grant SES sending permissions, scoped to this account's verified
     // identities (sending FROM an identity requires the identity resource)

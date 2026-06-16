@@ -137,6 +137,7 @@ export class VoiceStack extends cdk.Stack {
           CONNECT_INSTANCE_ID: pooledConnectInstance.ref,
           CONTACT_FLOW_ID: outboundFlow.ref,
           CONNECT_CAMPAIGN_ID: campaign.ref,
+          DISPATCH_QUEUE_URL: this.voiceDispatchQueue.queueUrl,
         },
         bundling: {
           externalModules: ["@aws-sdk/*"],
@@ -147,6 +148,7 @@ export class VoiceStack extends cdk.Stack {
     // 6. Grant permissions
     props.dbSecret.grantRead(dispatchLambda);
     this.voiceDispatchQueue.grantConsumeMessages(dispatchLambda);
+    this.voiceDispatchQueue.grantSendMessages(dispatchLambda); // continuations
 
     // Grant Connect sending permissions
     dispatchLambda.addToRolePolicy(
