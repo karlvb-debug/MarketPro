@@ -71,6 +71,37 @@ export interface MergeResult {
  */
 export type BulkSelection = { contactIds: string[] } | { rules: unknown };
 
+/**
+ * Selection scope for an export job. Mirrors the backend Selection union
+ * (lambda/lib/bulk.ts): explicit ids, a rule tree, or the entire workspace.
+ */
+export type ExportSelection = { contactIds: string[] } | { rules: unknown } | { all: true };
+
+/**
+ * Server-side saved view (GET/POST/PUT /views). `definition` is opaque JSON
+ * the frontend owns — for contacts it holds the active filter chips + segment
+ * (and optionally a column list). `userId` is the owner; `shared` exposes it
+ * to the whole workspace.
+ */
+export interface SavedView {
+  viewId: string;
+  name: string;
+  definition: unknown;
+  shared: boolean;
+  userId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Status of an async CSV export job (GET /contacts/export/{jobId}). */
+export interface ExportJobStatus {
+  status: 'pending' | 'running' | 'complete' | 'failed';
+  rowCount: number | null;
+  error: string | null;
+  /** Presigned download URL — present only when status === 'complete'. */
+  downloadUrl: string | null;
+}
+
 /** A bulk action applied to the selection (POST /contacts/bulk). */
 export type BulkAction =
   | { type: 'add_segment'; segmentId: string }
@@ -250,6 +281,22 @@ export const api = {
     /** Selection-aware bulk action (editor; admin for delete). */
     bulk: (body: { selection: BulkSelection; action: BulkAction }) =>
       apiClient.post<{ affected: number }>('/contacts/bulk', body),
+    /** Start an async CSV export of a selection. Returns 202 { jobId, status }. */
+    export: (body: { selection: ExportSelection; columns?: string[] }) =>
+      apiClient.post<{ jobId: string; status: ExportJobStatus['status'] }>('/contacts/export', body),
+    /** Poll an export job's status + presigned download URL. */
+    exportStatus: (jobId: string) =>
+      apiClient.get<ExportJobStatus>(`/contacts/export/${jobId}`),
+  },
+
+  // Saved views — server-synced per-user + shared workspace views
+  views: {
+    list: () => apiClient.get<ApiResponse<SavedView[]>>('/views'),
+    create: (body: { name: string; definition: unknown; shared?: boolean }) =>
+      apiClient.post<SavedView>('/views', body),
+    update: (id: string, body: { name?: string; definition?: unknown; shared?: boolean }) =>
+      apiClient.put<SavedView>(`/views/${id}`, body),
+    remove: (id: string) => apiClient.delete(`/views/${id}`),
   },
 
   // Custom field definitions

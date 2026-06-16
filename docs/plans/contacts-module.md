@@ -1,6 +1,6 @@
 # Contacts Module — Deep Feature Plan
 
-> Status: C1 ✅ · C2 ✅ · C3 ✅ · C4 ✅ DONE (June 15, 2026) · C5 planned · Created June 12, 2026
+> Status: C1–C5 ✅ ALL DONE (June 16, 2026) · Module complete · Created June 12, 2026
 > Goal: make contact management the strongest part of the product — typed
 > custom fields, rule-based dynamic segments, server-side filtering and
 > views, per-contact send history and consent evidence, dedup/merge, and
@@ -145,7 +145,7 @@ the rule engine can use them.*
   delete (existing) and bulk export.
 - Merge UI: side-by-side compare with per-field pick.
 
-### C5 — Views, search, export at scale (~1 week)
+### C5 — Views, search, export at scale (~1 week) — ✅ DONE
 
 - **Server-side saved views**: `views` table (per user per workspace —
   rules + visible columns + sort), replacing localStorage; shared

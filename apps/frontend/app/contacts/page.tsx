@@ -13,6 +13,8 @@ import BulkActionBar from '../components/BulkActionBar';
 import DuplicateReviewModal from '../components/DuplicateReviewModal';
 import { validatePhone } from '../lib/contact-utils';
 import { CORE_RULE_FIELDS } from '../lib/rule-fields';
+import { api, type ApiError, type ExportSelection, type SavedView as ServerSavedView } from '../lib/api-client';
+import { useAuth } from '../lib/auth';
 
 // ---- FILTER CHIPS ----
 interface ActiveFilter {
@@ -20,6 +22,38 @@ interface ActiveFilter {
   field: string;
   operator: 'contains' | 'equals' | 'starts_with' | 'is_empty' | 'is_not_empty';
   value: string;
+}
+
+// ---- SAVED VIEWS ----
+// The view's `definition` is opaque JSON the frontend owns; for contacts it
+// holds the active filter chips + the active segment. Views are persisted by
+// the backend (GET/POST/PUT/DELETE /views) — own views plus any shared with
+// the workspace.
+interface ViewDefinition {
+  filters: ActiveFilter[];
+  segmentId: string | null;
+}
+interface SavedView {
+  id: string;        // server viewId
+  name: string;
+  filters: ActiveFilter[];
+  segmentId: string | null;
+  shared: boolean;
+  ownerId: string;
+}
+
+/** Coerce a server view row into the local SavedView shape, tolerating a
+ *  missing/empty definition. */
+function toSavedView(v: ServerSavedView): SavedView {
+  const def = (v.definition && typeof v.definition === 'object' ? v.definition : {}) as Partial<ViewDefinition>;
+  return {
+    id: v.viewId,
+    name: v.name,
+    filters: Array.isArray(def.filters) ? def.filters : [],
+    segmentId: def.segmentId ?? null,
+    shared: Boolean(v.shared),
+    ownerId: v.userId,
+  };
 }
 
 // Chip operator → rule-engine op (POST /contacts/search):
@@ -200,44 +234,74 @@ export default function ContactsPage() {
   const [filters, setFilters] = useState<ActiveFilter[]>([]);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
 
-  // ---- SAVED VIEWS ----
-  interface SavedView {
-    id: string;
-    name: string;
-    filters: ActiveFilter[];
-    segmentId: string | null;
-  }
+  // ---- SAVED VIEWS (server-synced) ----
+  // The view's `definition` is opaque JSON the frontend owns; for contacts it
+  // holds the active filter chips + the active segment. Views are persisted by
+  // the backend (GET/POST/PUT/DELETE /views) — own views plus any shared with
+  // the workspace. The server `viewId`, `shared` flag, and owner `userId` ride
+  // along so we can show a shared badge and the owner of views we don't own.
+  const { user } = useAuth();
+  const currentUserId = user?.userId ?? null;
+
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [showSaveViewInput, setShowSaveViewInput] = useState(false);
   const [newViewName, setNewViewName] = useState('');
+  const [newViewShared, setNewViewShared] = useState(false);
+  const [savingView, setSavingView] = useState(false);
 
-  // Load saved views from localStorage
+  // Load saved views from the server on mount / workspace change. Drops the
+  // legacy localStorage cache cleanly (we no longer read it).
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem('cliquey_saved_views');
-      if (stored) setSavedViews(JSON.parse(stored));
-    } catch { /* ignore */ }
-  }, []);
+    let cancelled = false;
+    api.views.list()
+      .then((res) => { if (!cancelled) setSavedViews((res.data || []).map(toSavedView)); })
+      .catch(() => { /* views are low-stakes; leave the bar empty on failure */ });
+    try { localStorage.removeItem('cliquey_saved_views'); } catch { /* ignore */ }
+    return () => { cancelled = true; };
+  }, [hydrated]);
 
-  const persistViews = (views: SavedView[]) => {
-    setSavedViews(views);
-    localStorage.setItem('cliquey_saved_views', JSON.stringify(views));
+  const buildDefinition = (): ViewDefinition => ({
+    filters: filters.map((f) => ({ ...f })),
+    segmentId: activeSegmentId,
+  });
+
+  const saveCurrentView = async () => {
+    const name = newViewName.trim();
+    if (!name || savingView) return;
+    setSavingView(true);
+    try {
+      const created = await api.views.create({ name, definition: buildDefinition(), shared: newViewShared });
+      const view = toSavedView(created);
+      setSavedViews((prev) => [...prev, view].sort((a, b) => a.name.localeCompare(b.name)));
+      setActiveViewId(view.id);
+      setNewViewName('');
+      setNewViewShared(false);
+      setShowSaveViewInput(false);
+      showToast(`View "${view.name}" saved`);
+    } catch (err) {
+      showToast((err as ApiError).message || 'Could not save view', 'error');
+    } finally {
+      setSavingView(false);
+    }
   };
 
-  const saveCurrentView = () => {
-    if (!newViewName.trim()) return;
-    const view: SavedView = {
-      id: crypto.randomUUID(),
-      name: newViewName.trim(),
-      filters: filters.map((f) => ({ ...f, id: crypto.randomUUID() })),
-      segmentId: activeSegmentId,
-    };
-    persistViews([...savedViews, view]);
-    setActiveViewId(view.id);
-    setNewViewName('');
-    setShowSaveViewInput(false);
-    showToast(`View "${view.name}" saved`);
+  // Persist the current filters/segment over the active view (PUT).
+  const updateActiveView = async () => {
+    if (!activeViewId || savingView) return;
+    const view = savedViews.find((v) => v.id === activeViewId);
+    if (!view) return;
+    setSavingView(true);
+    try {
+      const updated = await api.views.update(view.id, { definition: buildDefinition() });
+      const next = toSavedView(updated);
+      setSavedViews((prev) => prev.map((v) => (v.id === next.id ? next : v)));
+      showToast(`View "${next.name}" updated`);
+    } catch (err) {
+      showToast((err as ApiError).message || 'Could not update view', 'error');
+    } finally {
+      setSavingView(false);
+    }
   };
 
   const loadView = (view: SavedView) => {
@@ -247,9 +311,17 @@ export default function ContactsPage() {
     setSearch('');
   };
 
-  const deleteView = (viewId: string) => {
-    persistViews(savedViews.filter((v) => v.id !== viewId));
+  const deleteView = async (viewId: string) => {
+    const prev = savedViews;
+    // Optimistic removal — restore on failure.
+    setSavedViews((vs) => vs.filter((v) => v.id !== viewId));
     if (activeViewId === viewId) setActiveViewId(null);
+    try {
+      await api.views.remove(viewId);
+    } catch (err) {
+      setSavedViews(prev);
+      showToast((err as ApiError).message || 'Could not delete view', 'error');
+    }
   };
 
   // Quick-filter presets
@@ -365,6 +437,20 @@ export default function ContactsPage() {
   );
   const allOnPageSelected = displayContacts.length > 0 && displayContacts.every((c) => selectedIds.has(c.contactId));
 
+  // The active view, and whether the current filters/segment have diverged
+  // from its saved definition (so we can offer "Update this view").
+  const activeView = activeViewId ? savedViews.find((v) => v.id === activeViewId) || null : null;
+  const activeViewDirty = useMemo(() => {
+    if (!activeView) return false;
+    const norm = (fs: ActiveFilter[]) =>
+      JSON.stringify(fs.map((f) => ({ field: f.field, operator: f.operator, value: f.value })));
+    return norm(activeView.filters) !== norm(filters) || activeView.segmentId !== activeSegmentId;
+  }, [activeView, filters, activeSegmentId]);
+  // Owner can always edit; admins also can on the backend, but the frontend
+  // has no role, so for shared views we only show the button to the owner and
+  // let a 403 surface as a toast otherwise.
+  const canEditActiveView = !!activeView && activeView.ownerId === currentUserId;
+
   // Selection
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -409,8 +495,73 @@ export default function ContactsPage() {
     }));
   };
 
-  // ---- EXPORT CSV ----
-  const exportCsv = useCallback(() => {
+  // ---- EXPORT ----
+  // Primary path: server-side async CSV export of the full selection scope
+  // (POST /contacts/export → 202 { jobId } → poll GET /contacts/export/{id}).
+  // No column picker exists on this page, so we send no `columns` and let the
+  // backend's default column set apply.
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const exporting = exportStatus !== null;
+  const exportCancelled = useRef(false);
+  useEffect(() => () => { exportCancelled.current = true; }, []);
+
+  const startExport = useCallback(async () => {
+    if (exporting) return;
+
+    // Selection scope mirrors the BulkActionBar pattern: explicit checked rows
+    // win; otherwise the active filter rules; otherwise the whole workspace.
+    let selection: ExportSelection;
+    if (selectedIds.size > 0) {
+      selection = { contactIds: Array.from(selectedIds) };
+    } else if (filterRules) {
+      selection = { rules: filterRules };
+    } else {
+      selection = { all: true };
+    }
+
+    exportCancelled.current = false;
+    setExportStatus('Preparing export…');
+    try {
+      const { jobId } = await api.contacts.export({ selection });
+
+      const deadline = Date.now() + 120_000; // cap polling at ~2 minutes
+      for (;;) {
+        if (exportCancelled.current) return;
+        if (Date.now() > deadline) {
+          setExportStatus(null);
+          showToast('Export timed out. Please try again.', 'error');
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 1500));
+        if (exportCancelled.current) return;
+
+        const job = await api.contacts.exportStatus(jobId);
+        if (job.status === 'complete') {
+          setExportStatus(null);
+          if (job.downloadUrl) {
+            window.open(job.downloadUrl, '_blank', 'noopener,noreferrer');
+            showToast(`Export ready${job.rowCount != null ? ` — ${job.rowCount.toLocaleString()} rows` : ''}`);
+          } else {
+            showToast('Export completed but no download URL was returned.', 'error');
+          }
+          return;
+        }
+        if (job.status === 'failed') {
+          setExportStatus(null);
+          showToast(job.error || 'Export failed', 'error');
+          return;
+        }
+        setExportStatus(job.status === 'running' ? 'Generating CSV…' : 'Preparing export…');
+      }
+    } catch (err) {
+      setExportStatus(null);
+      showToast((err as ApiError).message || 'Could not start export', 'error');
+    }
+  }, [exporting, selectedIds, filterRules]);
+
+  // Quick client-side export of the rows currently loaded on this page — handy
+  // for tiny one-off exports without waiting on the async job.
+  const quickExportCsv = useCallback(() => {
     const rows = selectedIds.size > 0
       ? displayContacts.filter((c) => selectedIds.has(c.contactId))
       : displayContacts;
@@ -497,8 +648,20 @@ export default function ContactsPage() {
                 >
                   ⧩ Filter{filters.length > 0 ? ` (${filters.length})` : ''}
                 </Button>
-                <Button size="sm" onClick={exportCsv} title="Export contacts as CSV">
-                  ↓ Export
+                <Button
+                  size="sm"
+                  onClick={startExport}
+                  disabled={exporting}
+                  title={selectedIds.size > 0
+                    ? 'Export the selected contacts as CSV'
+                    : filterRules
+                      ? 'Export all contacts matching the active filters as CSV'
+                      : 'Export all contacts as CSV'}
+                >
+                  {exporting ? '⏳ Preparing…' : '↓ Export'}
+                </Button>
+                <Button size="sm" onClick={quickExportCsv} title="Export the rows loaded on this page (no waiting)">
+                  Quick export (this page)
                 </Button>
                 <Button size="sm" onClick={() => setShowDuplicatesModal(true)} title="Find and merge duplicate contacts">
                   ⧉ Find Duplicates
@@ -528,12 +691,21 @@ export default function ContactsPage() {
                 <Button size="xs" onClick={() => { setShowBulkEditModal(true); setBulkEditData({ company: '', state: '', timezone: '' }); }}>
                   ✏ Edit
                 </Button>
-                <Button size="xs" onClick={exportCsv}>
-                  ↓ Export Selected
+                <Button size="xs" onClick={startExport} disabled={exporting}>
+                  {exporting ? '⏳ Preparing…' : '↓ Export Selected'}
                 </Button>
               </>
             ) : undefined}
           />
+
+          {/* Async export status — announced to assistive tech */}
+          <div className="sr-status" role="status" aria-live="polite">
+            {exportStatus && (
+              <div className="export-status-banner text-sm text-secondary" style={{ padding: 'var(--space-2) var(--space-3)' }}>
+                {exportStatus}
+              </div>
+            )}
+          </div>
 
           {/* Filter bar */}
           {(filters.length > 0 || showFilterMenu) && (
@@ -589,6 +761,14 @@ export default function ContactsPage() {
                   title="Save as view"
                 >💾 Save View</button>
               )}
+              {activeView && activeViewDirty && canEditActiveView && (
+                <button
+                  className="filter-save-btn"
+                  onClick={updateActiveView}
+                  disabled={savingView}
+                  title={`Save these changes to the "${activeView.name}" view`}
+                >↻ Update this view</button>
+              )}
               {filters.length > 0 && (
                 <button
                   className="filter-save-btn"
@@ -623,12 +803,28 @@ export default function ContactsPage() {
               {savedViews.length > 0 && (
                 <div className="saved-views">
                   <span className="saved-views-label">Views:</span>
-                  {savedViews.map((v) => (
-                    <div key={v.id} className={`saved-view-chip ${activeViewId === v.id ? 'saved-view-active' : ''}`}>
-                      <button className="saved-view-name" onClick={() => loadView(v)}>{v.name}</button>
-                      <button className="saved-view-delete" onClick={() => deleteView(v.id)} title="Delete view" aria-label={`Delete view ${v.name}`}>×</button>
-                    </div>
-                  ))}
+                  {savedViews.map((v) => {
+                    const owned = v.ownerId === currentUserId;
+                    return (
+                      <div key={v.id} className={`saved-view-chip ${activeViewId === v.id ? 'saved-view-active' : ''}`}>
+                        <button
+                          className="saved-view-name"
+                          onClick={() => loadView(v)}
+                          title={v.shared && !owned ? `Shared view (owned by another member)` : v.shared ? 'Shared with the workspace' : undefined}
+                        >
+                          {v.shared && (
+                            <span className="badge badge-subtle" title="Shared with the workspace" aria-label="Shared view" style={{ marginRight: 'var(--space-1)' }}>
+                              👥{!owned ? ' shared' : ''}
+                            </span>
+                          )}
+                          {v.name}
+                        </button>
+                        {owned && (
+                          <button className="saved-view-delete" onClick={() => deleteView(v.id)} title="Delete view" aria-label={`Delete view ${v.name}`}>×</button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -648,8 +844,13 @@ export default function ContactsPage() {
                 autoFocus
                 style={{ flex: '1', minWidth: 120 }}
               />
-              <Button size="xs" variant="primary" onClick={saveCurrentView} disabled={!newViewName.trim()}>Save</Button>
-              <Button size="xs" onClick={() => setShowSaveViewInput(false)}>Cancel</Button>
+              <Checkbox
+                label="Share with workspace"
+                checked={newViewShared}
+                onChange={() => setNewViewShared((s) => !s)}
+              />
+              <Button size="xs" variant="primary" onClick={saveCurrentView} disabled={!newViewName.trim() || savingView}>Save</Button>
+              <Button size="xs" onClick={() => { setShowSaveViewInput(false); setNewViewShared(false); }}>Cancel</Button>
             </div>
           )}
 
