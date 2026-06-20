@@ -250,8 +250,18 @@ describe('ApiStack', () => {
       userPool: auth.userPool,
       userPoolClient: auth.userPoolClient,
       opsAlertsTopic: db.opsAlertsTopic,
+      idempotencyTable: db.idempotencyTable,
     });
     template = Template.fromStack(stack);
+  });
+
+  test('exposes the email test-send endpoint backed by an SES-sending Lambda', () => {
+    template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'test-send' });
+    const lambdas = template.findResources('AWS::Lambda::Function');
+    const sender = Object.values(lambdas).find((fn) =>
+      JSON.stringify(fn.Properties?.Environment ?? {}).includes('IDEMPOTENCY_TABLE'),
+    );
+    expect(sender).toBeDefined();
   });
 
   test('WAF web ACL with rate limit + managed rules is associated with the API stage', () => {

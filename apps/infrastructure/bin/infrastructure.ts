@@ -92,6 +92,7 @@ const apiStack = new ApiStack(app, stackId('MarketingSaaSApiStack'), {
   voiceDispatchQueue: voiceStack.voiceDispatchQueue,
   uploadBucket: contactIngestionStack.uploadBucket,
   opsAlertsTopic: databaseStack.opsAlertsTopic,
+  idempotencyTable: databaseStack.idempotencyTable,
   // frontendUrl: 'https://app.yourdomain.com', // Set this for production
 });
 

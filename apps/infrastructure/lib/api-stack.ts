@@ -10,6 +10,7 @@ import * as rds from 'aws-cdk-lib/aws-rds';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as sns from 'aws-cdk-lib/aws-sns';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as eventsTargets from 'aws-cdk-lib/aws-events-targets';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
@@ -31,6 +32,7 @@ export interface ApiStackProps extends cdk.StackProps {
   uploadBucket?: s3.IBucket;
   frontendUrl?: string;
   opsAlertsTopic?: sns.ITopic;
+  idempotencyTable?: dynamodb.TableV2;
 }
 
 export class ApiStack extends cdk.Stack {
@@ -209,6 +211,28 @@ export class ApiStack extends cdk.Stack {
     });
     props.dbSecret.grantRead(settingsLambda);
 
+    // Email test-send — renders a template and sends one email via SES,
+    // bypassing segments/billing/suppression. Rate-limited via the
+    // idempotency table.
+    const emailTestSendLambda = new lambdaNodejs.NodejsFunction(this, 'EmailTestSendFunction', {
+      ...commonLambdaProps,
+      entry: path.join(__dirname, '../lambda/email-test-send.ts'),
+      handler: 'handler',
+      environment: {
+        ...commonLambdaProps.environment,
+        IDEMPOTENCY_TABLE: props.idempotencyTable?.tableName ?? '',
+      },
+    });
+    props.dbSecret.grantRead(emailTestSendLambda);
+    props.idempotencyTable?.grantReadWriteData(emailTestSendLambda);
+    emailTestSendLambda.addToRolePolicy(new cdk.aws_iam.PolicyStatement({
+      actions: ['ses:SendEmail', 'ses:SendRawEmail'],
+      resources: [
+        `arn:aws:ses:${this.region}:${this.account}:identity/*`,
+        `arn:aws:ses:${this.region}:${this.account}:configuration-set/*`,
+      ],
+    }));
+
     const templatesLambda = new lambdaNodejs.NodejsFunction(this, 'TemplatesFunction', {
       ...commonLambdaProps,
       entry: path.join(__dirname, '../lambda/api/templates.ts'),
@@ -378,6 +402,11 @@ export class ApiStack extends cdk.Stack {
     const settingsIntegration = new apigateway.LambdaIntegration(settingsLambda);
     settingsResource.addMethod('GET', settingsIntegration, securedMethodOptions);
     settingsResource.addMethod('PUT', settingsIntegration, securedMethodOptions);
+
+    // ---- /email/test-send ----
+    const emailResource = this.api.root.addResource('email');
+    emailResource.addResource('test-send').addMethod(
+      'POST', new apigateway.LambdaIntegration(emailTestSendLambda), securedMethodOptions);
 
     // ---- /templates/{type} and /templates/{type}/{id} ----
     const templatesResource = this.api.root.addResource('templates');
