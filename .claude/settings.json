@@ -1,0 +1,38 @@
+{
+  "env": {
+    "TEST_DATABASE_URL": "postgresql://marketpro:marketpro@localhost:5432/marketpro_test"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(npm run check-types)",
+      "Bash(npm run lint)",
+      "Bash(npm test)",
+      "Bash(npm run build)",
+      "Bash(npx turbo run:*)",
+      "Bash(npx eslint:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx jest:*)",
+      "Bash(npx next build:*)",
+      "Bash(npx next start:*)",
+      "Bash(npx playwright test --list)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git add:*)",
+      "Bash(git log:*)",
+      "Bash(pg_isready)",
+      "Bash(psql postgresql://marketpro:*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

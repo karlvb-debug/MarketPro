@@ -1,0 +1,96 @@
+# CLAUDE.md — MarketPro
+
+Multi-channel marketing platform (email MVP). Turborepo: `apps/frontend`
+(Next.js 16, React 19) + `apps/infrastructure` (AWS CDK, Lambda, Drizzle/RDS
+Postgres). Architecture: `architecture_plan.md`. Status & roadmap:
+`FOUNDATION_REVIEW.md`. Active plans: `docs/plans/`.
+
+> Sessions are ephemeral (fresh clone). Nothing survives but the repo — commit
+> work that matters, and trust this file over re-deriving conventions.
+
+## Verify before you call something done
+
+From the repo root, this gate must pass — it's what CI runs:
+
+```
+TEST_DATABASE_URL=postgresql://marketpro:marketpro@localhost:5432/marketpro_test \
+  npx turbo run lint check-types test build
+```
+
+- Lint is **zero-warning** (`--max-warnings 0`). Don't relax it; fix the code.
+- Postgres is needed for tests: `sudo service postgresql start`; the
+  `marketpro_test` DB/user is created by the SessionStart hook (or by hand —
+  see git history). Integration tests **skip** without `TEST_DATABASE_URL`, so
+  always run with it set or you'll get false green.
+
+## Testing conventions
+
+- Integration tests run against **real Postgres**, never a mock. Pattern:
+  `runMigrations(pool)` in `beforeAll`, a fresh workspace per test for
+  isolation, `closePool()` in `afterAll` if the code under test uses the
+  shared singleton pool (`lib/db`). See `test/*.int.test.ts`.
+- Pure logic (rule compiler, CSV escaping, error triage, validators) has
+  fast unit tests with a hostile-input section where untrusted input enters.
+- CDK stacks have assertion tests (`test/infrastructure.test.ts`); bundling is
+  skipped via the test App context.
+
+## Load-bearing invariants — violating these causes real bugs
+
+- **Rule engine is the only query path** for contact filtering / segments /
+  bulk selection / export (`lambda/lib/rules.ts`). It's a whitelist AST→SQL
+  compiler; values are **always bound parameters**. Never build a parallel
+  query string or interpolate user input — that reintroduces injection.
+- **Migrations are append-only.** Add `database/migrations/NNNN-*.ts` and
+  register it in `index.ts`; never edit an applied migration. They run
+  automatically on deploy via a CDK Trigger; the runner is transactional and
+  advisory-locked.
+- **Dispatch is claim-before-send / exactly-once.** A unique
+  `(campaign_id, contact_id)` claim row is inserted before the provider call,
+  so redelivery/continuation never double-sends. Retryable errors propagate
+  (SQS→DLQ); per-recipient errors are recorded and the campaign continues.
+  Quiet-hours skips self-heal via delayed re-queue. Don't bypass the claim.
+- **Billing authorizes then settles.** Campaign launch places an atomic
+  authorization hold (insufficient funds → 402); delivery/bounce events
+  settle against it. Never send without a hold or charge outside the ledger.
+- **Email body lives server-side.** `email_templates.html_content` is what
+  dispatch sends; `editor_json` is the builder's source of truth. The builder
+  must persist both (this is the E1 work — see `docs/plans/email-mvp.md`).
+- **Tenant isolation**: every query is workspace-scoped; the authorizer
+  injects the role. Contact FKs are `SET NULL` (anonymize, keep aggregates)
+  except `contact_segment` (CASCADE) — GDPR erasure and merge depend on this.
+
+## Secrets & hygiene
+
+- DB/Stripe creds come from **Secrets Manager** at runtime
+  (`DATABASE_SECRET_ARN`, etc.) — never plaintext env vars, never in code.
+- **Never commit** `cdk-outputs.json` (real account/resource IDs) or `.bak`
+  files; both are gitignored.
+
+## Infrastructure
+
+- Stage-aware: `cdk deploy --all --context stage=dev|staging|prod`. `dev`
+  keeps legacy unsuffixed names; other stages are namespaced. `prod` gets
+  Multi-AZ, encryption, deletion protection, backups.
+- CD: push to `main` → staging; prod is a gated manual `workflow_dispatch`.
+
+## Frontend conventions
+
+- State is `useStore()` composed from domain slices in `app/lib/store/`
+  (public API is byte-stable — don't change slice return shapes casually).
+- Mutations follow **optimistic update → rollback on failure → `showToast`**
+  (see `store/contacts.ts`). Surface API errors; never swallow them.
+- Server-side everything: filtering, segments, views, export all go through
+  the API. localStorage is for drafts only, not the system of record.
+
+## Working agreement
+
+- Develop on the designated feature branch. **Commit/push only when asked.**
+- Commit trailer: `Co-Authored-By: Claude ...` + the session link (see git log
+  for the exact format).
+- For multi-file frontend surfaces, a sub-agent scoped to `apps/frontend` is
+  the established pattern; always re-run the full gate before committing its work.
+- Harness config lives in `.claude/`: a SessionStart hook
+  (`hooks/session-start.sh`) starts Postgres + ensures the `marketpro_test` DB
+  on fresh web sessions, and `settings.json` sets `TEST_DATABASE_URL`, allows
+  the safe recurring commands, and keeps `git push` / `npm install` / `sudo`
+  as explicit confirmations.
