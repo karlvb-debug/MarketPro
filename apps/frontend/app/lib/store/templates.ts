@@ -199,6 +199,23 @@ export function useTemplatesSlice({ setData, apiCall }: TemplatesSliceDeps) {
     // Note: webforms don't have a backend handler yet
   }, [setData]);
 
+  // Duplicate an email template (name/subject/HTML/design) into a new server
+  // template. Returns the new id (or null on failure).
+  const duplicateEmailTemplate = useCallback(async (templateId: string): Promise<string | null> => {
+    let source: EmailTemplate | undefined;
+    setData((prev) => {
+      source = prev.templates.email.find((t) => t.templateId === templateId);
+      return prev;
+    });
+    if (!source) return null;
+    return addEmailTemplate({
+      name: `Copy of ${source.name}`,
+      subjectLine: source.subjectLine,
+      htmlContent: source.htmlContent,
+      editorJson: source.editorJson ?? null,
+    });
+  }, [addEmailTemplate, setData]);
+
   const deleteTemplate = useCallback((templateId: string, type: 'email' | 'sms' | 'voice' | 'webform') => {
     setData((prev) => ({
       ...prev,
@@ -292,6 +309,7 @@ export function useTemplatesSlice({ setData, apiCall }: TemplatesSliceDeps) {
   return {
     addEmailTemplate,
     saveEmailDesign,
+    duplicateEmailTemplate,
     addSmsTemplate,
     addVoiceTemplate,
     addWebForm,

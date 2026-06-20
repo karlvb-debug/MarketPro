@@ -1,6 +1,6 @@
 # Email MVP — Create / Build / Manage / Send
 
-> Status: E1 ✅ · E2 ✅ DONE (June 16, 2026) · E3–E5 planned · Created June 16, 2026
+> Status: E1 ✅ · E2 ✅ · E3 ✅ DONE (June 16, 2026) · E4–E5 planned · Created June 16, 2026
 > Goal: a customer can design an email, save it, build a campaign from it,
 > preview and test-send it, and trust that the audience receives exactly
 > what they built — with the deliverability guardrails to do it safely.
@@ -80,9 +80,20 @@ endpoint and (optionally) thumbnail support.
   save/send on hard failures (e.g. no unsubscribe — RFC 8058 is wired in
   dispatch, but CAN-SPAM physical address must be present).
 
-### E3 — Template management (~3 days)
+### E3 — Template management (~3 days) — ✅ DONE (with one carve-out)
 
 *Browse, reuse, organize.*
+
+> **Done:** duplicate (server copy), rendered email preview in the templates
+> drawer (iframe of `html_content` — the plan's degrade-to-iframe path,
+> chosen over generating image thumbnails for the MVP), inline rename
+> (server-backed). Delete/rename already hit the server.
+> **Carved out → E3b (folder persistence):** template **folders are
+> client-only** — `addTemplateFolder` mints a local UUID, `load.ts` never
+> loads folders, and `moveTemplateToFolder` updates local state without an
+> API call (no template-folders API exists). Making folders server-backed
+> (folders API + load + name↔folder_id mapping on templates) is its own
+> self-contained task; deferred rather than half-built.
 
 - Email templates list on the templates page: thumbnail/preview card, last-
   edited, subject; "Edit in builder" round-trip; duplicate, rename, delete,

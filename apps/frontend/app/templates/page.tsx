@@ -44,6 +44,9 @@ export default function TemplatesPage() {
   const [testSendId, setTestSendId] = useState<string | null>(null);
   const [testTo, setTestTo] = useState('');
   const [testSending, setTestSending] = useState(false);
+  // Inline rename (email templates)
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const [smsName, setSmsName] = useState('');
   const [smsBody, setSmsBody] = useState('');
   const [voiceName, setVoiceName] = useState('');
@@ -104,6 +107,19 @@ export default function TemplatesPage() {
     } else {
       showToast('Failed to create email template', 'error');
     }
+  };
+
+  const handleDuplicate = async (id: string) => {
+    const newId = await store.duplicateEmailTemplate(id);
+    if (newId) showToast('Template duplicated');
+  };
+
+  const handleRename = (id: string) => {
+    const name = renameValue.trim();
+    if (!name) return;
+    store.renameTemplate(id, 'email', name);
+    showToast('Renamed');
+    setRenamingId(null);
   };
 
   const handleSendTest = async () => {
@@ -278,7 +294,10 @@ export default function TemplatesPage() {
                         <td onClick={(e) => e.stopPropagation()}>
                           <div className="flex gap-1">
                             {activeType === 'email' && (
-                              <a href={`/email-builder?templateId=${id}`} className="btn btn-secondary btn-sm">Edit</a>
+                              <>
+                                <a href={`/email-builder?templateId=${id}`} className="btn btn-secondary btn-sm">Edit</a>
+                                <Button variant="ghost" size="sm" aria-label={`Duplicate ${item.name}`} title="Duplicate" onClick={() => handleDuplicate(id)}>⧉</Button>
+                              </>
                             )}
                             <Button variant="ghost" size="sm" aria-label={`Delete ${item.name}`} onClick={() => handleDeleteItem(id)}>✕</Button>
                           </div>
@@ -316,10 +335,32 @@ export default function TemplatesPage() {
                       <span className="badge badge-neutral">{previewItem.folder}</span>
                     </div>
                   )}
-                  <div className="tpl-preview-actions">
-                    <a href={`/email-builder?templateId=${getTplId(previewItem)}`} className="btn btn-primary btn-sm w-full">Open in Editor</a>
-                    <Button variant="secondary" size="sm" className="w-full" onClick={() => { setTestSendId(getTplId(previewItem)); setTestTo(user?.email || ''); }}>Send test</Button>
+                  <div className="tpl-preview-field" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 'var(--space-2)' }}>
+                    <span className="tpl-preview-label">Preview</span>
+                    {previewItem.htmlContent ? (
+                      <iframe
+                        title="Template preview"
+                        srcDoc={previewItem.htmlContent}
+                        style={{ width: '100%', height: '320px', border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-md)', background: '#fff' }}
+                      />
+                    ) : (
+                      <span className="text-tertiary" style={{ fontSize: 'var(--text-sm)' }}>No design yet — open in the editor to build it.</span>
+                    )}
                   </div>
+                  {renamingId === getTplId(previewItem) ? (
+                    <div className="tpl-preview-actions">
+                      <Input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleRename(getTplId(previewItem)); if (e.key === 'Escape') setRenamingId(null); }} autoFocus />
+                      <Button variant="primary" size="sm" className="w-full" onClick={() => handleRename(getTplId(previewItem))}>Save name</Button>
+                      <Button variant="ghost" size="sm" className="w-full" onClick={() => setRenamingId(null)}>Cancel</Button>
+                    </div>
+                  ) : (
+                    <div className="tpl-preview-actions">
+                      <a href={`/email-builder?templateId=${getTplId(previewItem)}`} className="btn btn-primary btn-sm w-full">Open in Editor</a>
+                      <Button variant="secondary" size="sm" className="w-full" onClick={() => { setTestSendId(getTplId(previewItem)); setTestTo(user?.email || ''); }}>Send test</Button>
+                      <Button variant="secondary" size="sm" className="w-full" onClick={() => handleDuplicate(getTplId(previewItem))}>Duplicate</Button>
+                      <Button variant="ghost" size="sm" className="w-full" onClick={() => { setRenamingId(getTplId(previewItem)); setRenameValue(previewItem.name); }}>Rename</Button>
+                    </div>
+                  )}
                 </>
               )}
               {activeType === 'sms' && 'estimatedSegments' in previewItem && (
