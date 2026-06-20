@@ -43,3 +43,6 @@ cdk-outputs.json
 
 # Backup files
 *.bak
+
+# Sub-agent worktrees (harness scratch)
+.claude/worktrees/
