@@ -2,6 +2,8 @@
 
 import { useState, useMemo } from 'react';
 import { useStore, templateRecordId, type AnyTemplate } from '../lib/store';
+import { api, ApiError } from '../lib/api-client';
+import { useAuth } from '../lib/auth';
 import Toolbar from '../components/Toolbar';
 import TemplateFolderPanel from '../components/TemplateFolderPanel';
 import { Button, EmptyState, LoadingState, Modal, Field, Input, Textarea, FormActions, showToast } from '../components/ui';
@@ -37,6 +39,11 @@ export default function TemplatesPage() {
   const [showNewWebForm, setShowNewWebForm] = useState(false);
   const [emailName, setEmailName] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
+  // Test-send modal (email rows)
+  const { user } = useAuth();
+  const [testSendId, setTestSendId] = useState<string | null>(null);
+  const [testTo, setTestTo] = useState('');
+  const [testSending, setTestSending] = useState(false);
   const [smsName, setSmsName] = useState('');
   const [smsBody, setSmsBody] = useState('');
   const [voiceName, setVoiceName] = useState('');
@@ -96,6 +103,20 @@ export default function TemplatesPage() {
       window.location.href = `/email-builder?templateId=${id}`;
     } else {
       showToast('Failed to create email template', 'error');
+    }
+  };
+
+  const handleSendTest = async () => {
+    if (!testSendId || !testTo.trim()) return;
+    setTestSending(true);
+    try {
+      await api.email.testSend({ templateId: testSendId, to: testTo.trim() });
+      showToast(`Test sent to ${testTo.trim()}`);
+      setTestSendId(null);
+    } catch (err) {
+      showToast((err as Partial<ApiError> | null)?.message || 'Failed to send test email.', 'error');
+    } finally {
+      setTestSending(false);
     }
   };
 
@@ -297,6 +318,7 @@ export default function TemplatesPage() {
                   )}
                   <div className="tpl-preview-actions">
                     <a href={`/email-builder?templateId=${getTplId(previewItem)}`} className="btn btn-primary btn-sm w-full">Open in Editor</a>
+                    <Button variant="secondary" size="sm" className="w-full" onClick={() => { setTestSendId(getTplId(previewItem)); setTestTo(user?.email || ''); }}>Send test</Button>
                   </div>
                 </>
               )}
@@ -367,6 +389,21 @@ export default function TemplatesPage() {
       </div>
 
       {/* ===== NEW EMAIL MODAL ===== */}
+      <Modal isOpen={!!testSendId} onClose={() => setTestSendId(null)} title="Send Test Email">
+        <form onSubmit={(e) => { e.preventDefault(); handleSendTest(); }}>
+          <p className="text-secondary" style={{ fontSize: 'var(--text-sm)', marginBottom: 'var(--space-3)' }}>
+            Sends the saved email with sample merge values to one address. Doesn&apos;t touch your audience or billing.
+          </p>
+          <Field label="Recipient">
+            <Input type="email" value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="you@example.com" autoFocus />
+          </Field>
+          <FormActions>
+            <Button variant="secondary" type="button" onClick={() => setTestSendId(null)}>Cancel</Button>
+            <Button variant="primary" type="submit" disabled={!testTo.trim() || testSending}>{testSending ? 'Sending…' : 'Send test'}</Button>
+          </FormActions>
+        </form>
+      </Modal>
+
       <Modal isOpen={showNewEmail} onClose={() => setShowNewEmail(false)} title="New Email">
         <form onSubmit={handleAddEmail}>
           <Field label="Name" required>

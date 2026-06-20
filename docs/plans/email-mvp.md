@@ -1,6 +1,6 @@
 # Email MVP — Create / Build / Manage / Send
 
-> Status: E1 ✅ DONE (June 16, 2026) · E2–E5 planned · Created June 16, 2026
+> Status: E1 ✅ · E2 ✅ DONE (June 16, 2026) · E3–E5 planned · Created June 16, 2026
 > Goal: a customer can design an email, save it, build a campaign from it,
 > preview and test-send it, and trust that the audience receives exactly
 > what they built — with the deliverability guardrails to do it safely.
@@ -58,7 +58,7 @@ endpoint and (optionally) thumbnail support.
   local draft" once; otherwise drop the key cleanly (mirror the C5 views
   migration decision).
 
-### E2 — Authoring essentials (~4 days)
+### E2 — Authoring essentials (~4 days) — ✅ DONE
 
 *The things a sender needs before trusting a blast.*
 

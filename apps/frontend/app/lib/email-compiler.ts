@@ -249,6 +249,26 @@ export function injectPhysicalAddress(design: EmailDesign, address: string): Ema
 
 // --- Compile to HTML (client-side via mjml-browser) ---
 
+// Sample values for the "Preview with sample data" toggle. Mirrors the
+// server-side merge-tag replacement (dispatch/core/personalize.ts mergeTags):
+// both spellings, case-insensitive, optional inner whitespace.
+const MERGE_SAMPLES: Record<string, string> = {
+  first_name: 'Jordan',
+  firstname: 'Jordan',
+  last_name: 'Lee',
+  lastname: 'Lee',
+  company: 'Acme Inc',
+};
+
+/** Resolve {{first_name}} / {{firstName}} / {{last_name}} / {{lastName}} /
+ *  {{company}} against sample values. Unknown tags are left untouched. Pure. */
+export function applyMergeSamples(text: string): string {
+  return text.replace(/\{\{\s*([a-zA-Z_]+)\s*\}\}/g, (match, raw: string) => {
+    const value = MERGE_SAMPLES[raw.toLowerCase()];
+    return value !== undefined ? value : match;
+  });
+}
+
 export async function compileToHtml(design: EmailDesign, businessAddress?: string): Promise<string> {
   // Inject physical address if provided
   const processedDesign = businessAddress

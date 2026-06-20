@@ -347,6 +347,12 @@ export const api = {
     delete: (id: string) => apiClient.delete(`/campaigns/${id}`),
   },
 
+  // Email actions (test send)
+  email: {
+    testSend: (body: { templateId: string; to: string }) =>
+      apiClient.post<{ sent: boolean; to: string }>('/email/test-send', body),
+  },
+
   // Templates
   templates: {
     email: {

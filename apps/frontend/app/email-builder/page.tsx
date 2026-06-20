@@ -4,9 +4,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { EmailDesign } from '../lib/email-templates';
 import { STARTER_TEMPLATES } from '../lib/email-templates';
-import { compileToHtml, validateEmailCompliance } from '../lib/email-compiler';
+import { compileToHtml, validateEmailCompliance, applyMergeSamples } from '../lib/email-compiler';
 import EmailBlockEditor from '../components/EmailBlockEditor';
 import { useStore } from '../lib/store';
+import { useAuth } from '../lib/auth';
+import { api, ApiError } from '../lib/api-client';
 import { useConfirm } from '../components/ConfirmDialog';
 import { showToast } from '../components/ui/Toast';
 import LoadingState from '../components/ui/LoadingState';
@@ -56,6 +58,18 @@ export default function EmailBuilderPage() {
   // The server template this design is bound to (null = unsaved/new)
   const [currentTemplateId, setCurrentTemplateId] = useState<string | null>(null);
 
+  // Preview modal (device width + sample-data merge toggle)
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewDevice, setPreviewDevice] = useState<'desktop' | 'mobile'>('desktop');
+  const [previewSamples, setPreviewSamples] = useState(true);
+  const [previewHtml, setPreviewHtml] = useState('');
+
+  // Test-send modal
+  const [showTestSend, setShowTestSend] = useState(false);
+  const [testTo, setTestTo] = useState('');
+  const [testSending, setTestSending] = useState(false);
+
+  const { user } = useAuth();
   const searchParams = useSearchParams();
   const formId = searchParams.get('formId');
   const templateId = searchParams.get('templateId');
@@ -178,14 +192,79 @@ export default function EmailBuilderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [design, currentTemplateId, store]);
 
+  // Warn on hard compliance errors before saving (mirrors the Export flow).
+  const passesComplianceGate = useCallback(async (): Promise<boolean> => {
+    if (!design) return false;
+    const errors = validateEmailCompliance(design, getBusinessAddress()).filter((w) => w.severity === 'error');
+    if (errors.length === 0) return true;
+    return confirm(
+      `⚠️ Compliance issues:\n\n${errors.map((e) => `• ${e.message}`).join('\n')}\n\nSave anyway?`,
+      { title: 'Compliance Warning', variant: 'danger', confirmLabel: 'Save Anyway' },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [design, confirm]);
+
   // Header save: existing template saves directly; a new one names itself first.
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!design) return;
+    if (!(await passesComplianceGate())) return;
     if (currentTemplateId) {
       void persistToServer(saveName || design.subject || 'Untitled Email');
     } else {
       setSaveName(design.subject || 'Untitled Email');
       setShowSaveModal(true);
+    }
+  };
+
+  // Build the preview HTML (optionally with sample merge values resolved).
+  const openPreview = async () => {
+    if (!design) return;
+    setShowPreview(true);
+    setPreviewHtml('');
+    try {
+      let html = await compileToHtml(design, getBusinessAddress());
+      if (previewSamples) html = applyMergeSamples(html);
+      setPreviewHtml(html);
+    } catch {
+      setPreviewHtml('<p style="padding:1rem;font-family:sans-serif">Could not render preview.</p>');
+    }
+  };
+
+  // Re-render when the sample toggle flips while the preview is open.
+  useEffect(() => {
+    if (!showPreview || !design) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        let html = await compileToHtml(design, getBusinessAddress());
+        if (previewSamples) html = applyMergeSamples(html);
+        if (!cancelled) setPreviewHtml(html);
+      } catch { /* keep prior */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewSamples]);
+
+  const openTestSend = () => {
+    if (!currentTemplateId) {
+      showToast('Save the email first, then send a test.', 'info');
+      return;
+    }
+    setTestTo(user?.email || '');
+    setShowTestSend(true);
+  };
+
+  const handleSendTest = async () => {
+    if (!currentTemplateId || !testTo.trim()) return;
+    setTestSending(true);
+    try {
+      await api.email.testSend({ templateId: currentTemplateId, to: testTo.trim() });
+      showToast(`Test sent to ${testTo.trim()}`);
+      setShowTestSend(false);
+    } catch (err) {
+      showToast((err as Partial<ApiError> | null)?.message || 'Failed to send test email.', 'error');
+    } finally {
+      setTestSending(false);
     }
   };
 
@@ -312,6 +391,15 @@ export default function EmailBuilderPage() {
                 value={design.subject}
                 onChange={(e) => handleDesignChange({ ...design, subject: e.target.value })}
               />
+              <label className="eb-subject-label" htmlFor="eb-preheader">Preview:</label>
+              <input
+                id="eb-preheader"
+                className="eb-subject-input"
+                placeholder="Inbox preview text…"
+                title="Shown as the inbox preview snippet after the subject."
+                value={design.previewText}
+                onChange={(e) => handleDesignChange({ ...design, previewText: e.target.value })}
+              />
             </div>
           )}
           {mode === 'form' && linkedForm && (
@@ -322,6 +410,10 @@ export default function EmailBuilderPage() {
           <a href="/templates" className="btn btn-ghost btn-sm">← Back to Content</a>
           {mode !== 'form' && (
             <>
+              <button className="btn btn-ghost btn-sm" onClick={openPreview}>Preview</button>
+              <button className="btn btn-ghost btn-sm" onClick={openTestSend} title={currentTemplateId ? 'Send a test email' : 'Save first to send a test'}>
+                Send test
+              </button>
               <button className="btn btn-secondary btn-sm" onClick={handleExport} disabled={exporting}>
                 {exporting ? 'Compiling…' : 'Export HTML'}
               </button>
@@ -372,6 +464,73 @@ export default function EmailBuilderPage() {
               <button className="btn btn-secondary" onClick={() => setShowSaveModal(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={handleConfirmSaveNew} disabled={!saveName.trim() || saving}>
                 {saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Preview Modal (device width + sample-data toggle) */}
+      {showPreview && (
+        <>
+          <div className="modal-overlay" onClick={() => setShowPreview(false)} />
+          <div className="modal-content" role="dialog" aria-modal="true" aria-label="Email preview" style={{ maxWidth: '860px', maxHeight: '88vh', display: 'flex', flexDirection: 'column' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">Preview</h2>
+              <button onClick={() => setShowPreview(false)} className="btn btn-ghost btn-icon modal-close" aria-label="Close dialog">✕</button>
+            </div>
+            <div style={{ display: 'flex', gap: 'var(--space-2)', padding: 'var(--space-3) var(--space-6)', borderBottom: '1px solid var(--border-primary)', alignItems: 'center' }}>
+              <div role="group" aria-label="Preview device" style={{ display: 'flex', gap: 'var(--space-1)' }}>
+                <button className={`btn btn-sm ${previewDevice === 'desktop' ? 'btn-secondary' : 'btn-ghost'}`} aria-pressed={previewDevice === 'desktop'} onClick={() => setPreviewDevice('desktop')}>Desktop</button>
+                <button className={`btn btn-sm ${previewDevice === 'mobile' ? 'btn-secondary' : 'btn-ghost'}`} aria-pressed={previewDevice === 'mobile'} onClick={() => setPreviewDevice('mobile')}>Mobile</button>
+              </div>
+              <label style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-2)', alignItems: 'center', fontSize: 'var(--text-sm)' }}>
+                <input type="checkbox" checked={previewSamples} onChange={(e) => setPreviewSamples(e.target.checked)} />
+                Preview with sample data
+              </label>
+            </div>
+            <div className="modal-body" style={{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center', background: 'var(--bg-primary)' }}>
+              {previewHtml ? (
+                <iframe
+                  title="Email preview"
+                  srcDoc={previewHtml}
+                  style={{ width: previewDevice === 'mobile' ? '375px' : `${design.contentWidth}px`, maxWidth: '100%', height: '60vh', border: '1px solid var(--border-primary)', borderRadius: 'var(--radius-md)', background: '#fff' }}
+                />
+              ) : <LoadingState label="Rendering…" />}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Test-send Modal */}
+      {showTestSend && (
+        <>
+          <div className="modal-overlay" onClick={() => setShowTestSend(false)} />
+          <div className="modal-content" role="dialog" aria-modal="true" aria-label="Send test email" style={{ maxWidth: '420px' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">Send Test Email</h2>
+              <button onClick={() => setShowTestSend(false)} className="btn btn-ghost btn-icon modal-close" aria-label="Close dialog">✕</button>
+            </div>
+            <div className="modal-body">
+              <p className="text-secondary" style={{ fontSize: 'var(--text-sm)', marginBottom: 'var(--space-3)' }}>
+                Sends the <strong>saved</strong> version of this email, with sample merge values, to one address. It doesn&apos;t touch your audience or billing.
+              </p>
+              <label className="eb-settings-label" htmlFor="eb-test-to">Recipient</label>
+              <input
+                id="eb-test-to"
+                type="email"
+                className="eb-settings-input"
+                value={testTo}
+                onChange={(e) => setTestTo(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSendTest(); }}
+                placeholder="you@example.com"
+                autoFocus
+              />
+            </div>
+            <div style={{ padding: 'var(--space-4) var(--space-6)', borderTop: '1px solid var(--border-primary)', display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-3)' }}>
+              <button className="btn btn-secondary" onClick={() => setShowTestSend(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleSendTest} disabled={!testTo.trim() || testSending}>
+                {testSending ? 'Sending…' : 'Send test'}
               </button>
             </div>
           </div>
