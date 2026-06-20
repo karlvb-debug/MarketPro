@@ -138,6 +138,10 @@ export interface EmailTemplate {
   templateId: string;
   name: string;
   subjectLine: string;
+  /** Compiled HTML that dispatch sends. */
+  htmlContent?: string;
+  /** Block-editor design — source of truth for re-editing in the builder. */
+  editorJson?: import('../email-templates').EmailDesign | null;
   updatedAt: string;
   folder?: string;
   order: number;
@@ -320,6 +324,8 @@ export interface RawEmailTemplateRow {
   templateId?: string; template_id?: string;
   name?: string;
   subjectLine?: string; subject_line?: string;
+  htmlContent?: string; html_content?: string;
+  editorJson?: unknown; editor_json?: unknown;
   updatedAt?: string; updated_at?: string;
   folderId?: string; folder_id?: string;
   sortOrder?: number; sort_order?: number;

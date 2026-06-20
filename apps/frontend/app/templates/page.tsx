@@ -87,11 +87,16 @@ export default function TemplatesPage() {
     : `All ${labels.plural}`;
 
   // Handlers
-  const handleAddEmail = (e: React.FormEvent) => {
+  const handleAddEmail = async (e: React.FormEvent) => {
     e.preventDefault();
-    store.addEmailTemplate({ name: emailName, subjectLine: emailSubject });
-    showToast(`"${emailName}" created`);
+    const name = emailName;
     setEmailName(''); setEmailSubject(''); setShowNewEmail(false);
+    const id = await store.addEmailTemplate({ name, subjectLine: emailSubject });
+    if (id) {
+      window.location.href = `/email-builder?templateId=${id}`;
+    } else {
+      showToast('Failed to create email template', 'error');
+    }
   };
 
   const handleAddSms = (e: React.FormEvent) => {

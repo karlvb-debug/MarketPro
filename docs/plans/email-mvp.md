@@ -1,6 +1,6 @@
 # Email MVP — Create / Build / Manage / Send
 
-> Status: PLANNED · Created June 16, 2026
+> Status: E1 ✅ DONE (June 16, 2026) · E2–E5 planned · Created June 16, 2026
 > Goal: a customer can design an email, save it, build a campaign from it,
 > preview and test-send it, and trust that the audience receives exactly
 > what they built — with the deliverability guardrails to do it safely.
@@ -33,7 +33,7 @@ endpoint and (optionally) thumbnail support.
 
 ## 2. Phases
 
-### E1 — Connect the builder to server templates (the critical fix) (~3 days)
+### E1 — Connect the builder to server templates (the critical fix) (~3 days) — ✅ DONE
 
 *Without this, nothing else matters: campaigns send blank emails.*
 

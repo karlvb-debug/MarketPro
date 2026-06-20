@@ -6,9 +6,13 @@
 // ============================================
 
 import { useCallback } from 'react';
-import { api } from '../api-client';
-import type { AnyTemplate, ApiCallFn, SetStoreData, StoreData } from './types';
+import { api, ApiError } from '../api-client';
+import { showToast } from '../../components/ui/Toast';
+import type { AnyTemplate, ApiCallFn, EmailTemplate, SetStoreData, StoreData } from './types';
+import type { EmailDesign } from '../email-templates';
 import { templateRecordId } from './types';
+
+interface RawTemplateIdRow { templateId?: string; template_id?: string }
 
 interface TemplatesSliceDeps {
   setData: SetStoreData;
@@ -16,8 +20,16 @@ interface TemplatesSliceDeps {
 }
 
 export function useTemplatesSlice({ setData, apiCall }: TemplatesSliceDeps) {
-  const addEmailTemplate = useCallback((template: { name: string; subjectLine: string }) => {
-    const templateId = crypto.randomUUID();
+  // Create an email template. Returns the server-assigned id (or null on
+  // failure) so callers can open it in the builder. Awaits the POST so the id
+  // is real, then reconciles the optimistic temp row.
+  const addEmailTemplate = useCallback(async (template: {
+    name: string;
+    subjectLine: string;
+    htmlContent?: string;
+    editorJson?: EmailDesign | null;
+  }): Promise<string | null> => {
+    const tempId = crypto.randomUUID();
     setData((prev) => {
       const maxOrder = prev.templates.email.reduce((m, t) => Math.max(m, t.order), -1);
       return {
@@ -25,9 +37,11 @@ export function useTemplatesSlice({ setData, apiCall }: TemplatesSliceDeps) {
         templates: {
           ...prev.templates,
           email: [...prev.templates.email, {
-            templateId,
+            templateId: tempId,
             name: template.name,
             subjectLine: template.subjectLine,
+            htmlContent: template.htmlContent,
+            editorJson: template.editorJson ?? null,
             updatedAt: new Date().toISOString(),
             folder: '',
             order: maxOrder + 1,
@@ -35,12 +49,74 @@ export function useTemplatesSlice({ setData, apiCall }: TemplatesSliceDeps) {
         },
       };
     });
-    // API: create email template
-    apiCall(() => api.templates.email.create({
-      name: template.name,
-      subject_line: template.subjectLine,
-    }));
-  }, [apiCall, setData]);
+    try {
+      const row = await api.templates.email.create({
+        name: template.name,
+        subject_line: template.subjectLine,
+        html_content: template.htmlContent ?? null,
+        editor_json: template.editorJson ?? null,
+      }) as RawTemplateIdRow;
+      const realId = row.templateId || row.template_id || tempId;
+      setData((prev) => ({
+        ...prev,
+        templates: {
+          ...prev.templates,
+          email: prev.templates.email.map((t) => (t.templateId === tempId ? { ...t, templateId: realId } : t)),
+        },
+      }));
+      return realId;
+    } catch (err) {
+      // Roll back the optimistic row
+      setData((prev) => ({
+        ...prev,
+        templates: { ...prev.templates, email: prev.templates.email.filter((t) => t.templateId !== tempId) },
+      }));
+      showToast((err as Partial<ApiError> | null)?.message || 'Failed to create email template.', 'error');
+      return null;
+    }
+  }, [setData]);
+
+  // Persist a built design (name/subject/compiled HTML/editor JSON) to an
+  // existing email template. Optimistic with rollback + toast.
+  const saveEmailDesign = useCallback(async (templateId: string, fields: {
+    name: string;
+    subjectLine: string;
+    htmlContent: string;
+    editorJson: EmailDesign;
+  }): Promise<boolean> => {
+    let snapshot: EmailTemplate | undefined;
+    setData((prev) => {
+      snapshot = prev.templates.email.find((t) => t.templateId === templateId);
+      return {
+        ...prev,
+        templates: {
+          ...prev.templates,
+          email: prev.templates.email.map((t) => (t.templateId === templateId
+            ? { ...t, name: fields.name, subjectLine: fields.subjectLine, htmlContent: fields.htmlContent, editorJson: fields.editorJson, updatedAt: new Date().toISOString() }
+            : t)),
+        },
+      };
+    });
+    try {
+      await api.templates.email.update(templateId, {
+        name: fields.name,
+        subject_line: fields.subjectLine,
+        html_content: fields.htmlContent,
+        editor_json: fields.editorJson,
+      });
+      return true;
+    } catch (err) {
+      const restore = snapshot;
+      if (restore) {
+        setData((prev) => ({
+          ...prev,
+          templates: { ...prev.templates, email: prev.templates.email.map((t) => (t.templateId === templateId ? restore : t)) },
+        }));
+      }
+      showToast((err as Partial<ApiError> | null)?.message || 'Failed to save email.', 'error');
+      return false;
+    }
+  }, [setData]);
 
   const addSmsTemplate = useCallback((template: { name: string; body: string }) => {
     setData((prev) => {
@@ -215,6 +291,7 @@ export function useTemplatesSlice({ setData, apiCall }: TemplatesSliceDeps) {
 
   return {
     addEmailTemplate,
+    saveEmailDesign,
     addSmsTemplate,
     addVoiceTemplate,
     addWebForm,

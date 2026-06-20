@@ -2,33 +2,42 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
-import type { EmailDesign, SavedTemplate } from '../lib/email-templates';
-import {
-  STARTER_TEMPLATES,
-  loadSavedTemplates,
-  addSavedTemplate,
-  deleteSavedTemplate,
-  updateSavedTemplate,
-} from '../lib/email-templates';
+import type { EmailDesign } from '../lib/email-templates';
+import { STARTER_TEMPLATES } from '../lib/email-templates';
 import { compileToHtml, validateEmailCompliance } from '../lib/email-compiler';
 import EmailBlockEditor from '../components/EmailBlockEditor';
 import { useStore } from '../lib/store';
 import { useConfirm } from '../components/ConfirmDialog';
+import { showToast } from '../components/ui/Toast';
+import LoadingState from '../components/ui/LoadingState';
 
-const STORAGE_KEY = 'clq-email-design';
+// Local draft autosave for crash/refresh recovery only — the server template
+// is the system of record (see docs/plans/email-mvp.md E1).
+const DRAFT_KEY = 'clq-email-design';
 
-function loadDesign(): EmailDesign | null {
+function loadDraft(): EmailDesign | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(DRAFT_KEY);
     if (raw) return JSON.parse(raw);
-  } catch { /* corrupt saved design — start fresh */ }
+  } catch { /* corrupt draft — start fresh */ }
   return null;
 }
 
-function saveDesign(design: EmailDesign) {
+function saveDraft(design: EmailDesign) {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(design));
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(design)); } catch { /* quota — ignore */ }
+}
+
+function emptyEmailDesign(subject: string): EmailDesign {
+  return {
+    subject,
+    previewText: '',
+    bodyBackground: '#f0f2f5',
+    contentBackground: '#ffffff',
+    contentWidth: 600,
+    blocks: [],
+  };
 }
 
 export default function EmailBuilderPage() {
@@ -38,127 +47,101 @@ export default function EmailBuilderPage() {
   const [exportHtml, setExportHtml] = useState('');
   const [exporting, setExporting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  // Save Template modal
+  // Save modal (names a brand-new template before its first server save)
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveName, setSaveName] = useState('');
 
-  // My Templates
-  const [savedTemplates, setSavedTemplates] = useState<SavedTemplate[]>([]);
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
+  // The server template this design is bound to (null = unsaved/new)
+  const [currentTemplateId, setCurrentTemplateId] = useState<string | null>(null);
 
   const searchParams = useSearchParams();
   const formId = searchParams.get('formId');
+  const templateId = searchParams.get('templateId');
   const mode = searchParams.get('mode') === 'form' ? 'form' : 'email' as const;
   const store = useStore();
   const confirm = useConfirm();
 
-  // If form mode, look up the web form
   const linkedForm = (mode === 'form' && formId)
     ? store.templates.webform.find((f) => f.formId === formId)
     : null;
 
-  // Load saved templates
+  // One-time migration: the old localStorage "saved templates" list is no
+  // longer the source of truth (server templates are). Drop it cleanly.
   useEffect(() => {
-    setSavedTemplates(loadSavedTemplates());
+    try { localStorage.removeItem('clq-saved-templates'); } catch { /* ignore */ }
   }, []);
 
-  // Resume saved session or load from templateId or formId.
-  // Runs once on mount — the ref guard keeps it from re-running while letting
-  // the dependency array stay exhaustive.
+  // Initialize the editing session: a server template (?templateId), a form,
+  // or a recovered local draft. Waits for the store to hydrate when loading a
+  // server template so its editor_json is available.
   const initializedRef = useRef(false);
   useEffect(() => {
     if (initializedRef.current) return;
+
+    if (mode === 'form' && linkedForm) {
+      initializedRef.current = true;
+      setDesign(linkedForm.design ?? emptyEmailDesign(linkedForm.name || 'Contact Us'));
+      setView('editor');
+      return;
+    }
+
+    if (templateId) {
+      if (!store.hydrated) return; // wait for templates to load, then re-run
+      initializedRef.current = true;
+      const tmpl = store.templates.email.find((t) => t.templateId === templateId);
+      if (tmpl?.editorJson && Array.isArray(tmpl.editorJson.blocks)) {
+        setDesign(tmpl.editorJson);
+      } else {
+        // Template exists but has no saved design yet (created name+subject only)
+        setDesign(emptyEmailDesign(tmpl?.subjectLine || ''));
+      }
+      setCurrentTemplateId(templateId);
+      setSaveName(tmpl?.name || '');
+      setView('editor');
+      return;
+    }
+
+    // No target: offer to resume a local draft.
     initializedRef.current = true;
-    // In form mode, load from the form's design
-    if (mode === 'form' && linkedForm?.design) {
-      setDesign(linkedForm.design);
-      setView('editor');
-      return;
-    }
-    if (mode === 'form' && linkedForm && !linkedForm.design) {
-      // Create a default form design
-      const defaultFormDesign: EmailDesign = {
-        subject: '',
-        previewText: '',
-        bodyBackground: '#f0f2f5',
-        contentBackground: '#ffffff',
-        contentWidth: 600,
-        blocks: [
-          { id: 'f1', type: 'heading', props: { text: linkedForm.name || 'Contact Us', level: 'h2', align: 'center', color: '#1e293b' } },
-          { id: 'f2', type: 'text', props: { html: '<p style="text-align:center;color:#64748b;">Fill out the form below and we\'ll get back to you.</p>', align: 'center' } },
-          { id: 'f3', type: 'form-text-input', props: { label: 'Name', placeholder: 'Your full name', required: true, fieldName: 'name', inputType: 'text' } },
-          { id: 'f4', type: 'form-text-input', props: { label: 'Email', placeholder: 'you@example.com', required: true, fieldName: 'email', inputType: 'email' } },
-          { id: 'f5', type: 'form-textarea', props: { label: 'Message', placeholder: 'How can we help?', required: false, fieldName: 'message', rows: 4 } },
-          { id: 'f6', type: 'form-submit', props: { label: 'Submit', bgColor: '#059669', textColor: '#ffffff', borderRadius: '6px', align: 'center', successMessage: 'Thanks! We\'ll be in touch.' } },
-        ],
-      };
-      setDesign(defaultFormDesign);
-      setView('editor');
-      return;
-    }
-    const saved = loadDesign();
-    if (saved && saved.blocks?.length > 0) {
-      setDesign(saved);
+    const draft = loadDraft();
+    if (draft && draft.blocks?.length > 0) {
+      setDesign(draft);
       setView('editor');
     }
-  }, [mode, linkedForm]);
+  }, [mode, linkedForm, templateId, store.hydrated, store.templates.email]);
 
-  const refreshSavedTemplates = () => setSavedTemplates(loadSavedTemplates());
-
-  const handlePickTemplate = (templateId: string) => {
-    const tmpl = STARTER_TEMPLATES.find((t) => t.id === templateId);
+  const handlePickTemplate = (starterId: string) => {
+    const tmpl = STARTER_TEMPLATES.find((t) => t.id === starterId);
     if (!tmpl) return;
     const newDesign = JSON.parse(JSON.stringify(tmpl.design));
+    setCurrentTemplateId(null); // starting fresh — first save creates a template
     setDesign(newDesign);
-    saveDesign(newDesign);
+    saveDraft(newDesign);
     setView('editor');
   };
 
-  const handlePickSavedTemplate = (tmpl: SavedTemplate) => {
-    const newDesign = JSON.parse(JSON.stringify(tmpl.design));
-    setDesign(newDesign);
-    saveDesign(newDesign);
+  const handleOpenServerTemplate = (id: string) => {
+    const tmpl = store.templates.email.find((t) => t.templateId === id);
+    if (!tmpl) return;
+    setDesign(tmpl.editorJson && Array.isArray(tmpl.editorJson.blocks)
+      ? tmpl.editorJson
+      : emptyEmailDesign(tmpl.subjectLine || ''));
+    setCurrentTemplateId(id);
+    setSaveName(tmpl.name);
     setView('editor');
   };
 
   const handleDesignChange = useCallback((updated: EmailDesign) => {
     setDesign(updated);
-    // In form mode, save to the WebForm store entry
     if (mode === 'form' && formId) {
-      // We'll persist the design on the WebForm object
       const wf = store.templates.webform.find((f) => f.formId === formId);
-      if (wf) {
-        wf.design = updated;
-      }
+      if (wf) wf.design = updated;
     } else {
-      saveDesign(updated);
+      saveDraft(updated);
     }
   }, [mode, formId, store]);
-
-  const handleSaveTemplate = () => {
-    if (!design || !saveName.trim()) return;
-    addSavedTemplate(saveName.trim(), design);
-    refreshSavedTemplates();
-    setShowSaveModal(false);
-    setSaveName('');
-  };
-
-  const handleDeleteSavedTemplate = async (id: string) => {
-    const ok = await confirm('Delete this saved template?', { title: 'Delete Template', variant: 'danger' });
-    if (!ok) return;
-    deleteSavedTemplate(id);
-    refreshSavedTemplates();
-  };
-
-  const handleRenameSavedTemplate = (id: string) => {
-    if (!renameValue.trim()) return;
-    updateSavedTemplate(id, { name: renameValue.trim() });
-    refreshSavedTemplates();
-    setRenamingId(null);
-    setRenameValue('');
-  };
 
   const getBusinessAddress = () => {
     const s = store.settings;
@@ -166,27 +149,69 @@ export default function EmailBuilderPage() {
     return parts.join(' | ');
   };
 
+  // Compile + persist the design to the server (create or update).
+  const persistToServer = useCallback(async (name: string) => {
+    if (!design) return;
+    setSaving(true);
+    try {
+      let html: string;
+      try {
+        html = await compileToHtml(design, getBusinessAddress());
+      } catch {
+        showToast('Could not compile the email — please review the design.', 'error');
+        return;
+      }
+      if (currentTemplateId) {
+        const ok = await store.saveEmailDesign(currentTemplateId, {
+          name, subjectLine: design.subject, htmlContent: html, editorJson: design,
+        });
+        if (ok) showToast('Email saved');
+      } else {
+        const id = await store.addEmailTemplate({
+          name, subjectLine: design.subject, htmlContent: html, editorJson: design,
+        });
+        if (id) { setCurrentTemplateId(id); showToast('Email saved'); }
+      }
+    } finally {
+      setSaving(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [design, currentTemplateId, store]);
+
+  // Header save: existing template saves directly; a new one names itself first.
+  const handleSave = () => {
+    if (!design) return;
+    if (currentTemplateId) {
+      void persistToServer(saveName || design.subject || 'Untitled Email');
+    } else {
+      setSaveName(design.subject || 'Untitled Email');
+      setShowSaveModal(true);
+    }
+  };
+
+  const handleConfirmSaveNew = async () => {
+    if (!saveName.trim()) return;
+    setShowSaveModal(false);
+    await persistToServer(saveName.trim());
+  };
+
   const handleExport = async () => {
     if (!design) return;
-
-    // Run compliance checks
     const addr = getBusinessAddress();
     const warnings = validateEmailCompliance(design, addr);
     const errors = warnings.filter((w) => w.severity === 'error');
-
     if (errors.length > 0) {
       const proceed = await confirm(
         `⚠️ Compliance Issues Detected:\n\n${errors.map((e) => `• ${e.message}`).join('\n')}\n\nExport anyway?`,
-        { title: 'Compliance Warning', variant: 'danger', confirmLabel: 'Export Anyway' }
+        { title: 'Compliance Warning', variant: 'danger', confirmLabel: 'Export Anyway' },
       );
       if (!proceed) return;
     } else if (warnings.length > 0) {
       await confirm(
         `📝 Compliance Notes:\n\n${warnings.map((w) => `• ${w.message}`).join('\n')}`,
-        { title: 'Compliance Notes', confirmLabel: 'OK' }
+        { title: 'Compliance Notes', confirmLabel: 'OK' },
       );
     }
-
     setExporting(true);
     try {
       const html = await compileToHtml(design, addr);
@@ -205,8 +230,14 @@ export default function EmailBuilderPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Loading a server template that hasn't hydrated yet.
+  if (templateId && !store.hydrated && view === 'gallery' && !design) {
+    return <LoadingState />;
+  }
+
   // ========== GALLERY VIEW ==========
   if (view === 'gallery') {
+    const serverTemplates = [...store.templates.email].sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
     return (
       <div className="email-builder-container">
         <header className="email-builder-header">
@@ -217,46 +248,29 @@ export default function EmailBuilderPage() {
         <div className="eb-gallery">
           <div className="eb-gallery-header">
             <h2 className="eb-gallery-title">Choose a Template</h2>
-            <p className="eb-gallery-subtitle">Pick a starter or one of your saved templates</p>
+            <p className="eb-gallery-subtitle">Pick a starter or open one of your saved emails</p>
           </div>
 
-          {/* My Templates */}
-          {savedTemplates.length > 0 && (
+          {/* My Templates — server-backed */}
+          {serverTemplates.length > 0 && (
             <div className="eb-gallery-section">
               <h3 className="eb-gallery-section-title">My Templates</h3>
               <div className="eb-gallery-grid">
-                {savedTemplates.map((tmpl) => (
-                  <div key={tmpl.id} className="eb-template-card eb-template-card-saved">
-                    {renamingId === tmpl.id ? (
-                      <div className="eb-template-rename" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          className="eb-settings-input"
-                          value={renameValue}
-                          onChange={(e) => setRenameValue(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSavedTemplate(tmpl.id); if (e.key === 'Escape') setRenamingId(null); }}
-                          autoFocus
-                        />
-                        <div className="eb-template-rename-actions">
-                          <button className="btn btn-primary btn-sm" onClick={() => handleRenameSavedTemplate(tmpl.id)}>Save</button>
-                          <button className="btn btn-ghost btn-sm" onClick={() => setRenamingId(null)}>Cancel</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="eb-template-card-body" onClick={() => handlePickSavedTemplate(tmpl)}>
-                          <div className="eb-template-emoji">◇</div>
-                          <h3 className="eb-template-name">{tmpl.name}</h3>
-                          <p className="eb-template-desc">
-                            {tmpl.design.blocks.length} blocks · Updated {new Date(tmpl.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                          </p>
-                        </div>
-                        <div className="eb-template-card-actions">
-                          <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); setRenamingId(tmpl.id); setRenameValue(tmpl.name); }} title="Rename">✎</button>
-                          <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); handleDeleteSavedTemplate(tmpl.id); }} title="Delete">✕</button>
-                        </div>
-                      </>
-                    )}
-                  </div>
+                {serverTemplates.map((tmpl) => (
+                  <button
+                    key={tmpl.templateId}
+                    className="eb-template-card eb-template-card-saved"
+                    onClick={() => handleOpenServerTemplate(tmpl.templateId)}
+                  >
+                    <div className="eb-template-emoji">◇</div>
+                    <h3 className="eb-template-name">{tmpl.name}</h3>
+                    <p className="eb-template-desc">
+                      {tmpl.editorJson?.blocks?.length
+                        ? `${tmpl.editorJson.blocks.length} blocks`
+                        : 'No design yet'}
+                      {tmpl.updatedAt ? ` · Updated ${new Date(tmpl.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}
+                    </p>
+                  </button>
                 ))}
               </div>
             </div>
@@ -281,7 +295,7 @@ export default function EmailBuilderPage() {
   }
 
   // ========== EDITOR VIEW ==========
-  if (!design) return null;
+  if (!design) return <LoadingState />;
 
   return (
     <div className="email-builder-container">
@@ -290,8 +304,9 @@ export default function EmailBuilderPage() {
           <h1 className="email-builder-title">{mode === 'form' ? 'Form Builder' : 'Email Builder'}</h1>
           {mode !== 'form' && (
             <div className="eb-subject-input-wrap">
-              <label className="eb-subject-label">Subject:</label>
+              <label className="eb-subject-label" htmlFor="eb-subject">Subject:</label>
               <input
+                id="eb-subject"
                 className="eb-subject-input"
                 placeholder="Enter subject line..."
                 value={design.subject}
@@ -307,24 +322,18 @@ export default function EmailBuilderPage() {
           <a href="/templates" className="btn btn-ghost btn-sm">← Back to Content</a>
           {mode !== 'form' && (
             <>
-              <button className="btn btn-secondary btn-sm" onClick={() => { setSaveName(design.subject || 'Untitled Template'); setShowSaveModal(true); }}>
-                Save Template
-              </button>
               <button className="btn btn-secondary btn-sm" onClick={handleExport} disabled={exporting}>
                 {exporting ? 'Compiling…' : 'Export HTML'}
               </button>
-              <button
-                className="btn btn-primary btn-sm"
-                onClick={() => alert('Template saved and synced with Amazon SES!')}
-              >
-                Save to SES
+              <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
+                {saving ? 'Saving…' : 'Save'}
               </button>
             </>
           )}
           {mode === 'form' && (
             <button
               className="btn btn-primary btn-sm"
-              onClick={() => alert('Form saved! It will be available at your hosted form URL.')}
+              onClick={() => showToast('Form saved.')}
             >
               Save Form
             </button>
@@ -335,32 +344,35 @@ export default function EmailBuilderPage() {
       {/* Editor */}
       <EmailBlockEditor design={design} onChange={handleDesignChange} mode={mode} />
 
-      {/* Save Template Modal */}
+      {/* Name-and-save modal (first save of a new email) */}
       {showSaveModal && (
         <>
           <div className="modal-overlay" onClick={() => setShowSaveModal(false)} />
-          <div className="modal-content" style={{ maxWidth: '400px' }}>
+          <div className="modal-content" role="dialog" aria-modal="true" aria-label="Save email" style={{ maxWidth: '400px' }}>
             <div className="modal-header">
-              <h2 className="modal-title">Save as Template</h2>
-              <button onClick={() => setShowSaveModal(false)} className="btn btn-ghost btn-icon modal-close">✕</button>
+              <h2 className="modal-title">Save Email</h2>
+              <button onClick={() => setShowSaveModal(false)} className="btn btn-ghost btn-icon modal-close" aria-label="Close dialog">✕</button>
             </div>
             <div className="modal-body">
               <p className="text-secondary" style={{ fontSize: 'var(--text-sm)', marginBottom: 'var(--space-3)' }}>
-                Save the current design as a reusable template you can load later.
+                Save this email to your templates. You can build campaigns from it and edit it later.
               </p>
-              <label className="eb-settings-label">Template Name</label>
+              <label className="eb-settings-label" htmlFor="eb-save-name">Template Name</label>
               <input
+                id="eb-save-name"
                 className="eb-settings-input"
                 value={saveName}
                 onChange={(e) => setSaveName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveTemplate(); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmSaveNew(); }}
                 placeholder="e.g. Monthly Newsletter"
                 autoFocus
               />
             </div>
             <div style={{ padding: 'var(--space-4) var(--space-6)', borderTop: '1px solid var(--border-primary)', display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-3)' }}>
               <button className="btn btn-secondary" onClick={() => setShowSaveModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleSaveTemplate} disabled={!saveName.trim()}>Save Template</button>
+              <button className="btn btn-primary" onClick={handleConfirmSaveNew} disabled={!saveName.trim() || saving}>
+                {saving ? 'Saving…' : 'Save'}
+              </button>
             </div>
           </div>
         </>
@@ -370,10 +382,10 @@ export default function EmailBuilderPage() {
       {showExport && (
         <>
           <div className="modal-overlay" onClick={() => setShowExport(false)} />
-          <div className="modal-content" style={{ maxWidth: '720px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+          <div className="modal-content" role="dialog" aria-modal="true" aria-label="Compiled email HTML" style={{ maxWidth: '720px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
             <div className="modal-header">
               <h2 className="modal-title">Compiled Email HTML</h2>
-              <button onClick={() => setShowExport(false)} className="btn btn-ghost btn-icon modal-close">✕</button>
+              <button onClick={() => setShowExport(false)} className="btn btn-ghost btn-icon modal-close" aria-label="Close dialog">✕</button>
             </div>
             <div className="modal-body" style={{ flex: 1, overflow: 'auto' }}>
               <p className="text-secondary" style={{ fontSize: 'var(--text-sm)', marginBottom: 'var(--space-3)' }}>

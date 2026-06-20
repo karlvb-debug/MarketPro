@@ -60,6 +60,8 @@ export async function loadFromApi(): Promise<StoreData | null> {
       templateId: row.templateId || row.template_id || crypto.randomUUID(),
       name: row.name || '',
       subjectLine: row.subjectLine || row.subject_line || '',
+      htmlContent: row.htmlContent ?? row.html_content ?? undefined,
+      editorJson: (row.editorJson ?? row.editor_json ?? null) as EmailTemplate['editorJson'],
       updatedAt: row.updatedAt || row.updated_at || new Date().toISOString(),
       folder: row.folderId || row.folder_id || '',
       order: row.sortOrder || row.sort_order || 0,
