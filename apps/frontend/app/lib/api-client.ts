@@ -39,6 +39,11 @@ export interface ApiError {
   missingRequired?: string[];
   /** Unique custom-field keys whose values are already in use (POST /contacts 409) */
   fields?: string[];
+  /** 402 campaign-launch fields — required credits, available credits, recipient count */
+  required?: number;
+  available?: number;
+  recipients?: number;
+  campaignId?: string;
 }
 
 export interface ApiResponse<T> {
@@ -181,6 +186,10 @@ async function apiFetch<T>(
           fieldErrors: errorBody.fieldErrors,
           missingRequired: errorBody.missingRequired,
           fields: errorBody.fields,
+          required: errorBody.required,
+          available: errorBody.available,
+          recipients: errorBody.recipients,
+          campaignId: errorBody.campaignId,
         } as ApiError;
       }
 

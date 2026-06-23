@@ -1,6 +1,6 @@
 # Email MVP — Create / Build / Manage / Send
 
-> Status: E1 ✅ · E2 ✅ · E3 ✅ DONE (June 16, 2026) · E4–E5 planned · Created June 16, 2026
+> Status: E1 ✅ · E2 ✅ · E3 ✅ · E4 ✅ DONE (June 23, 2026) · E5 planned · Created June 16, 2026
 > Goal: a customer can design an email, save it, build a campaign from it,
 > preview and test-send it, and trust that the audience receives exactly
 > what they built — with the deliverability guardrails to do it safely.
@@ -107,9 +107,28 @@ endpoint and (optionally) thumbnail support.
   PUT, store `thumbnail_url`). Optional; degrade to a rendered-HTML
   `<iframe>` preview if skipped.
 
-### E4 — Campaign-from-template + send confidence (~3 days)
+### E4 — Campaign-from-template + send confidence (~3 days) — ✅ DONE
 
 *Turn a template into a trustworthy send.*
+
+> **Done:** the campaign wizard now renders a live `srcDoc` preview of the
+> actual template HTML (with sample merge-tag values) plus the audience count
+> and estimated cost in the Details step; a **pre-send checklist** in the
+> Review step grades subject / preview text / unsubscribe-&-footer compliance
+> (`validateEmailCompliance` on the saved `editor_json`) / from-address /
+> audience, with ✕ items hard-blocking the send and ! items warning; the
+> launcher's **402** response surfaces as a "not enough credits" panel showing
+> required / available / shortfall + eligible-recipient count instead of a
+> generic error; and a success panel confirms the launch and points to the
+> per-recipient delivery progress shown in the campaigns list.
+> **Backend reality folded in:** the campaigns API launches any non-future
+> campaign immediately (the old "Save as Draft" label actually sent), so the
+> wizard now offers honest **Send Now** vs **Schedule for later** options. A
+> true draft-without-send path needs a backend change (skip `launchCampaign`
+> for explicit drafts) and is out of E4's frontend-only scope.
+> **Carried forward:** a dedicated campaign **detail page** (per-recipient
+> `campaign_messages` rows + C3 rollups) doesn't exist yet — E4 links to the
+> list's progress bar; a full detail view is its own task.
 
 - Campaign creation: when an email template is chosen, show a **preview** of
   the actual rendered email, the **audience count** (reuse

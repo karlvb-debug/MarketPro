@@ -59,7 +59,7 @@ export function useStore() {
     importContacts,
   } = useContactsSlice({ data, setData });
 
-  const { addCampaign } = useCampaignsSlice({ setData, apiCall });
+  const { addCampaign } = useCampaignsSlice({ setData });
 
   const { markRead } = useInboxSlice({ setData, apiCall });
 

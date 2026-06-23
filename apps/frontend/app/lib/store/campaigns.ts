@@ -5,53 +5,92 @@
 // ============================================
 
 import { useCallback } from 'react';
-import { api } from '../api-client';
-import type { ApiCallFn, Campaign, SetStoreData } from './types';
+import { api, ApiError } from '../api-client';
+import { showToast } from '../../components/ui/Toast';
+import type { Campaign, SetStoreData } from './types';
+
+export type CampaignCreateResult =
+  | { ok: true }
+  | { ok: false; reason: 'insufficient_funds'; required: number; available: number; recipients: number }
+  | { ok: false; reason: 'error'; message: string };
 
 interface CampaignsSliceDeps {
   setData: SetStoreData;
-  apiCall: ApiCallFn;
 }
 
-export function useCampaignsSlice({ setData, apiCall }: CampaignsSliceDeps) {
-  const addCampaign = useCallback((campaign: {
+export function useCampaignsSlice({ setData }: CampaignsSliceDeps) {
+  const addCampaign = useCallback(async (campaign: {
     name: string;
     channel: 'email' | 'sms' | 'voice';
-    segment: string;
+    segment: string;       // display name — for local store
+    segmentId: string;     // UUID — for API
+    recipientCount: number;
     templateId?: string;
-    templateName?: string;
     scheduledAt: string | null;
-  }) => {
-    setData((prev) => {
-      // Find segment to get recipient count
-      const seg = prev.segments.find((s) => s.name === campaign.segment);
-      const newCampaign: Campaign = {
-        campaignId: crypto.randomUUID(),
+  }): Promise<CampaignCreateResult> => {
+    const tempId = crypto.randomUUID();
+
+    setData((prev) => ({
+      ...prev,
+      campaigns: [{
+        campaignId: tempId,
         name: campaign.name,
         channel: campaign.channel,
         status: campaign.scheduledAt ? 'scheduled' : 'draft',
         segment: campaign.segment,
         templateId: campaign.templateId,
-        templateName: campaign.templateName,
         scheduledAt: campaign.scheduledAt,
-        totalRecipients: seg?.count || 0,
+        totalRecipients: campaign.recipientCount,
         delivered: 0,
         opened: 0,
         clicked: 0,
         bounced: 0,
         createdAt: new Date().toISOString(),
-      };
-      return { ...prev, campaigns: [newCampaign, ...prev.campaigns] };
-    });
-    // API: create campaign
-    apiCall(() => api.campaigns.create({
-      name: campaign.name,
-      channel: campaign.channel,
-      segment_id: campaign.segment,
-      template_id: campaign.templateId,
-      scheduled_at: campaign.scheduledAt,
+      } as Campaign, ...prev.campaigns],
     }));
-  }, [apiCall, setData]);
+
+    try {
+      const row = await api.campaigns.create({
+        name: campaign.name,
+        channel: campaign.channel,
+        segment_id: campaign.segmentId,
+        template_id: campaign.templateId,
+        scheduled_at: campaign.scheduledAt,
+      }) as { campaignId?: string; campaign_id?: string; status?: string };
+
+      const realId = row.campaignId || row.campaign_id || tempId;
+      setData((prev) => ({
+        ...prev,
+        campaigns: prev.campaigns.map((c) =>
+          c.campaignId === tempId
+            ? { ...c, campaignId: realId, status: (row.status as Campaign['status']) || c.status }
+            : c
+        ),
+      }));
+      return { ok: true };
+    } catch (err) {
+      const apiErr = err as ApiError;
+
+      // Roll back optimistic insert
+      setData((prev) => ({
+        ...prev,
+        campaigns: prev.campaigns.filter((c) => c.campaignId !== tempId),
+      }));
+
+      if (apiErr.status === 402) {
+        return {
+          ok: false,
+          reason: 'insufficient_funds',
+          required: apiErr.required ?? 0,
+          available: apiErr.available ?? 0,
+          recipients: apiErr.recipients ?? 0,
+        };
+      }
+
+      showToast(apiErr.message || 'Failed to create campaign.', 'error');
+      return { ok: false, reason: 'error', message: apiErr.message || 'Failed to create campaign.' };
+    }
+  }, [setData]);
 
   return { addCampaign };
 }
