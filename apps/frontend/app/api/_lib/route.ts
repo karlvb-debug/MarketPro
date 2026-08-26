@@ -69,3 +69,6 @@ export async function withContext(
     return toResponse({ status: 500, body: { message: 'Internal server error' } });
   }
 }
+
+/** Next passes dynamic route params as a Promise. */
+export type RouteParams<T> = { params: Promise<T> };

@@ -57,6 +57,22 @@ export function strArray(body: JsonBody, ...keys: string[]): string[] | undefine
   return undefined;
 }
 
+/**
+ * First key that is present at all, as an opaque value. For jsonb columns,
+ * where the payload is arbitrary JSON the API stores verbatim.
+ */
+export function raw(body: JsonBody, ...keys: string[]): unknown {
+  for (const k of keys) {
+    if (body[k] !== undefined) return body[k];
+  }
+  return undefined;
+}
+
+/** True when any of the keys is present (used to tell "absent" from "null"). */
+export function has(body: JsonBody, ...keys: string[]): boolean {
+  return keys.some((k) => body[k] !== undefined);
+}
+
 /** Rows affected by a drizzle write, which types this loosely. */
 export function rowsAffected(result: unknown): number {
   const n = (result as { rowCount?: unknown } | null)?.rowCount;
