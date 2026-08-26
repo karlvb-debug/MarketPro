@@ -2,11 +2,11 @@
 // TEST_DATABASE_URL is set.
 
 import { Pool } from 'pg';
-import { runMigrations } from '../lambda/lib/migrate';
-import { mergeContacts } from '../lambda/lib/merge';
-import { findDuplicateClusters } from '../lambda/lib/duplicates';
-import { applyBulkAction } from '../lambda/lib/bulk';
-import { executeRightToBeForgotten } from '../lambda/lib/gdpr';
+import { runMigrations } from '../src/migrate';
+import { mergeContacts } from '../src/merge';
+import { findDuplicateClusters } from '../src/duplicates';
+import { applyBulkAction } from '../src/bulk';
+import { executeRightToBeForgotten } from '../src/gdpr';
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 const describeDb = TEST_DATABASE_URL ? describe : describe.skip;

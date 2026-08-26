@@ -1,13 +1,11 @@
-import { SQSEvent, SQSBatchResponse, Context } from 'aws-lambda';
-import { Logger } from '../../lib/logger';
-import { isRetryableError } from './errors';
+import { Logger } from '../logger';
 import { ChannelAdapter, DispatchStore } from './types';
 
 export const PAGE_SIZE = 500;
 
-// Leave headroom before the Lambda timeout to re-enqueue a continuation.
+// Leave headroom before the invocation timeout to re-enqueue a continuation.
 const TIME_BUFFER_MS = 30_000;
-// Quiet-hours deferrals are retried on a delay (SQS max) until the window opens.
+// Quiet-hours deferrals are retried on a delay until the window opens.
 const QUIET_HOURS_RETRY_DELAY_S = 900;
 // Safety cap (~25h at 15-min spacing) so a pathological deferral can't loop forever.
 const MAX_QUIET_HOURS_REQUEUE = 100;
@@ -26,7 +24,7 @@ export interface DispatchPayload {
 export interface DispatchOptions {
   /** Re-enqueue a follow-up dispatch message to this channel's own queue. */
   requeue?: (payload: DispatchPayload, delaySeconds: number) => Promise<void>;
-  /** Milliseconds left before the Lambda times out (default: unbounded). */
+  /** Milliseconds left before the invocation times out (default: unbounded). */
   timeRemainingMs?: () => number;
 }
 
@@ -39,11 +37,11 @@ export interface DispatchOptions {
  *   is inserted before sending; redelivered/continued records skip claimed rows.
  * - No per-campaign size ceiling: when the invocation nears its time budget it
  *   re-enqueues a continuation carrying the cursor, instead of relying on
- *   SQS visibility-timeout redelivery (which would hit maxReceiveCount → DLQ).
+ *   transport-level redelivery (which would eventually dead-letter).
  * - Quiet-hours self-healing: recipients skipped for TCPA quiet hours are not
  *   claimed; if any were deferred, the campaign re-enqueues a full rescan on a
  *   delay and stays 'sending' until the window opens and everyone is reached.
- * - Error triage: systemic errors propagate (SQS retry → DLQ); per-recipient
+ * - Error triage: systemic errors propagate (transport retry → dead-letter); per-recipient
  *   errors are recorded on the message row and the campaign continues.
  */
 export async function processCampaignDispatch<TTemplate, TSetup>(
@@ -60,7 +58,7 @@ export async function processCampaignDispatch<TTemplate, TSetup>(
   try {
     payload = JSON.parse(body);
   } catch {
-    baseLogger.error('Poison pill: SQS record body is not JSON', undefined, { body: body.substring(0, 200) });
+    baseLogger.error('Poison pill: dispatch payload is not JSON', undefined, { body: body.substring(0, 200) });
     return;
   }
 
@@ -199,61 +197,4 @@ export async function processCampaignDispatch<TTemplate, TSetup>(
     totalRecipients,
     unreachedDeferrals: deferredAny && requeueCount >= MAX_QUIET_HOURS_REQUEUE,
   });
-}
-
-/**
- * SQS handler wrapper: processes each record independently, reports partial
- * batch failures (so only retryable records are redelivered), and gives the
- * engine a self-requeue + time budget for continuations. Requires
- * reportBatchItemFailures on the event source mapping and DISPATCH_QUEUE_URL
- * in the environment for continuations to be enqueued.
- */
-export function makeSqsHandler<TTemplate, TSetup>(
-  getStore: () => Promise<DispatchStore>,
-  adapter: ChannelAdapter<TTemplate, TSetup>,
-): (event: SQSEvent, context?: Context) => Promise<SQSBatchResponse> {
-  return async (event: SQSEvent, context?: Context): Promise<SQSBatchResponse> => {
-    const logger = new Logger({ handler: `dispatch-${adapter.channel}` });
-    const batchItemFailures: { itemIdentifier: string }[] = [];
-
-    const store = await getStore();
-    const queueUrl = process.env.DISPATCH_QUEUE_URL;
-
-    // Self-requeue via the channel's own queue (lazy SQS client).
-    let requeue: DispatchOptions['requeue'];
-    if (queueUrl) {
-      requeue = async (payload, delaySeconds) => {
-        const { SQSClient, SendMessageCommand } = await import('@aws-sdk/client-sqs');
-        const sqs = new SQSClient({});
-        await sqs.send(new SendMessageCommand({
-          QueueUrl: queueUrl,
-          MessageBody: JSON.stringify(payload),
-          DelaySeconds: Math.min(900, Math.max(0, Math.floor(delaySeconds))),
-        }));
-      };
-    }
-    const timeRemainingMs = context ? () => context.getRemainingTimeInMillis() : undefined;
-
-    for (const record of event.Records) {
-      try {
-        await processCampaignDispatch(record.body, store, adapter, logger, { requeue, timeRemainingMs });
-      } catch (err) {
-        if (isRetryableError(err)) {
-          logger.error('Retryable dispatch failure — returning record to queue', err, {
-            sqsMessageId: record.messageId,
-          });
-          batchItemFailures.push({ itemIdentifier: record.messageId });
-        } else {
-          // Non-retryable and unhandled: log loudly but do not poison the
-          // queue. The claim rows preserve exactly which recipients were
-          // reached; the alarm on Lambda errors surfaces the condition.
-          logger.error('Non-retryable dispatch failure — dropping record', err, {
-            sqsMessageId: record.messageId,
-          });
-        }
-      }
-    }
-
-    return { batchItemFailures };
-  };
 }

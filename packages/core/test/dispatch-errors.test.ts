@@ -1,5 +1,5 @@
-import { errorCodeOf, isRetryableError, RetryableDispatchError } from '../lambda/dispatch/core/errors';
-import { mergeTags, toE164 } from '../lambda/dispatch/core/personalize';
+import { errorCodeOf, isRetryableError, RetryableDispatchError } from '../src/dispatch/errors';
+import { mergeTags, toE164 } from '../src/dispatch/personalize';
 
 describe('isRetryableError', () => {
   test('RetryableDispatchError is retryable', () => {

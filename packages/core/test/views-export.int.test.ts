@@ -3,8 +3,8 @@
 // is exercised without S3. Skipped unless TEST_DATABASE_URL is set.
 
 import { Pool } from 'pg';
-import { runMigrations } from '../lambda/lib/migrate';
-import { runExport, csvEscape, resolveColumns } from '../lambda/lib/export';
+import { runMigrations } from '../src/migrate';
+import { runExport, csvEscape, resolveColumns } from '../src/export';
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 const describeDb = TEST_DATABASE_URL ? describe : describe.skip;

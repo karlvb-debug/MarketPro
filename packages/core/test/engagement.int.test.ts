@@ -3,9 +3,9 @@
 
 import { Pool } from 'pg';
 import * as crypto from 'crypto';
-import { runMigrations } from '../lambda/lib/migrate';
-import { recordEngagement, recordSent } from '../lambda/lib/engagement';
-import { buildContactTimeline, getConsentState } from '../lambda/lib/timeline';
+import { runMigrations } from '../src/migrate';
+import { recordEngagement, recordSent } from '../src/engagement';
+import { buildContactTimeline, getConsentState } from '../src/timeline';
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 const describeDb = TEST_DATABASE_URL ? describe : describe.skip;

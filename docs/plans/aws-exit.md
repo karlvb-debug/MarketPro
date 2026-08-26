@@ -1,6 +1,6 @@
 # AWS Exit — Vercel + Supabase + Twilio
 
-> Status: planned · Created August 25, 2026
+> Status: **M1 complete** · Created August 25, 2026 · Updated August 26, 2026
 > Goal: run the whole product on Vercel + Supabase + Twilio with near-zero
 > idle cost, preserving every load-bearing invariant and the 156-test suite.
 > Trigger: the AWS account was closed when free credits ran out. Idle burn was
@@ -10,7 +10,8 @@
 
 ## 1. The decisive finding: the valuable code isn't AWS code
 
-Measured coupling across `lambda/lib` — ~2,400 lines of core logic:
+Measured coupling across `lambda/lib` — ~2,400 lines of core logic
+(paths as of planning; this code now lives in `packages/core/src` — see M1):
 
 | File | Lines | AWS imports |
 |---|---|---|
@@ -68,25 +69,55 @@ role; existing workspace scoping stays exactly as-is and stays tested.
 
 ## 4. Phases
 
-### M0 — Accounts & decisions (~0.5 day)
-- Supabase project, Vercel project, Twilio account (+ SendGrid for email).
-- Recreate the 4 secrets as env vars: Stripe secret, Stripe webhook secret,
+### M0 — Accounts & decisions (~0.5 day) — *partially done*
+- ☐ Supabase project, Vercel project, Twilio account (+ SendGrid for email).
+- ☐ Recreate the 4 secrets as env vars: Stripe secret, Stripe webhook secret,
   DB URL, Twilio creds. **No plaintext in code.**
-- Clear `cdk.context.json` (cached AZ lookups pin dead account 185011027929).
+- ☑ Clear `cdk.context.json` (cached AZ lookups pinned dead account
+  185011027929) — now `{}`.
 
-### M1 — Repo restructure: `packages/core` (~1–2 days)
-Lift the portable logic out of `apps/infrastructure` so both Next routes and
-the cron handler import one copy.
+### M1 — Repo restructure: `packages/core` ✅ **DONE**
+The portable logic now lives in `@repo/core`, imported by one copy.
 
 ```
-packages/core/     rules, billing, consent, merge, custom-fields,
-                   segment-query, export, gdpr, engagement, bulk,
-                   timeline, contact-validate, duplicates, personalize,
-                   dispatch/core (engine, store, quiet-hours, errors)
-apps/frontend/     Vercel — portal + API routes + cron handlers
+packages/core/src/      rules, billing, consent, merge, custom-fields,
+                        segment-query, export, gdpr, engagement, bulk,
+                        timeline, contact-validate, duplicates, db, logger,
+                        migrate, schema, database/migrations/
+packages/core/src/dispatch/   engine, store, quiet-hours, personalize,
+                              errors, types, testing
+apps/infrastructure/    AWS adapter only — CDK stacks, handlers,
+                        lambda/lib/db.ts (API-Gateway helpers),
+                        lambda/dispatch/sqs-handler.ts
 ```
-- `db.ts` is the only rewrite: drop Secrets Manager, take `DATABASE_URL`.
-- Move the tests with the code. **Gate must stay green at this step.**
+
+What landed:
+- **`@repo/core` has zero AWS imports** — verified, not assumed.
+- **`db.ts` rewritten**: Secrets Manager dropped; `DATABASE_URL` is the single
+  source of truth and it now *fails fast* when unset. The portable RBAC
+  hierarchy (`roleMeetsMin`) moved with it; the API-Gateway-shaped helpers
+  (`respond`, `requireRole`, authorizer-context readers) stayed behind in
+  `apps/infrastructure/lambda/lib/db.ts`, which M3 deletes.
+- **`engine.ts` split at its real seam**: `processCampaignDispatch` is core;
+  `makeSqsHandler` became `lambda/dispatch/sqs-handler.ts`. The engine no
+  longer names a transport, in code *or* comments — M4 swaps SQS for
+  cron/pg-boss by passing a different `requeue`.
+- **Dispatch fakes published** as `@repo/core/dispatch/testing`, so the engine
+  tests and any transport adapter's tests share one set of doubles.
+- **Tests moved with the code**: 110 in core (12 suites), 46 in infrastructure
+  (5 suites) — **156 total, unchanged**. `dispatch-engine.test.ts` split into
+  the engine's 22 transport-independent assertions (core) and the 3
+  SQS-transport assertions (infra).
+- **`packages/core` is linted** at `--max-warnings 0`, which
+  `apps/infrastructure` never was; the gate went from 7 tasks to 10.
+  `DATABASE_URL` added to `turbo.json` globalEnv.
+
+> ⚠️ Consequence, accepted: with Secrets Manager gone, the CDK stacks can no
+> longer run as deployed — they inject `DATABASE_SECRET_ARN`, not
+> `DATABASE_URL`. The AWS account is already closed and M7 deletes these
+> stacks, so this is the intended direction, not a regression to fix.
+> `test/infrastructure.test.ts` still asserts no plaintext `DATABASE_URL` in
+> Lambda env and still passes.
 
 ### M2 — Database on Supabase (~1 day)
 - Run the 6 append-only migrations against Supabase (runner is transactional +

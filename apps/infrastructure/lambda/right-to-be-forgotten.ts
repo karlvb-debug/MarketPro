@@ -7,8 +7,8 @@ import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 // ============================================
 
 import { getPool, respond, getWorkspaceId, getUserId, requireRole } from './lib/db';
-import { executeRightToBeForgotten } from './lib/gdpr';
-import { Logger } from './lib/logger';
+import { executeRightToBeForgotten } from '@repo/core/gdpr';
+import { Logger } from '@repo/core/logger';
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   const logger = new Logger({ handler: 'right-to-be-forgotten' });

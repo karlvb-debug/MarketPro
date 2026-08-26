@@ -1,5 +1,5 @@
-import { compileRules, RuleGroup, RuleValidationError, CustomFieldDefinition } from '../lambda/lib/rules';
-import { validateCustomFields, deriveKey, isValidKey, CustomFieldDef } from '../lambda/lib/custom-fields';
+import { compileRules, RuleGroup, RuleValidationError, CustomFieldDefinition } from '../src/rules';
+import { validateCustomFields, deriveKey, isValidKey, CustomFieldDef } from '../src/custom-fields';
 
 const noDefs: CustomFieldDefinition[] = [];
 

@@ -7,7 +7,7 @@
 // ============================================
 
 import { Pool } from 'pg';
-import { MIGRATIONS } from '../../database/migrations';
+import { MIGRATIONS } from './database/migrations';
 
 // Arbitrary fixed key for pg_advisory_lock, unique to this app's migrations
 const MIGRATION_LOCK_KEY = 7_421_001;

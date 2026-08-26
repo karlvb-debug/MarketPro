@@ -1,11 +1,11 @@
-// Error triage for dispatch Lambdas.
+// Error triage for dispatch.
 //
-// Retryable errors (infrastructure/systemic) must bubble up so SQS redelivers
-// the record and, after maxReceiveCount, parks it in the DLQ. Per-recipient
+// Retryable errors (infrastructure/systemic) must bubble up so the transport
+// redelivers the record and eventually dead-letters it. Per-recipient
 // errors (bad address, provider 4xx validation) must NOT fail the record —
 // they are recorded on the campaign_messages row and the campaign continues.
 
-/** Thrown by dispatch internals to force an SQS retry of the whole record. */
+/** Thrown by dispatch internals to force a transport retry of the whole record. */
 export class RetryableDispatchError extends Error {
   readonly cause?: unknown;
   constructor(message: string, cause?: unknown) {
@@ -56,7 +56,7 @@ interface ErrorLike {
 
 /**
  * True if the error is systemic (DB down, network, provider throttling/5xx)
- * and the whole SQS record should be retried. False means the error is
+ * and the whole record should be retried. False means the error is
  * data-specific and must be handled per recipient.
  */
 export function isRetryableError(err: unknown): boolean {

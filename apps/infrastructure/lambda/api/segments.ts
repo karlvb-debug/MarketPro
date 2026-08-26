@@ -13,16 +13,16 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { eq, and, inArray } from 'drizzle-orm';
 import { getDb, getPool, respond, getWorkspaceId, getUserId, requireRole } from '../lib/db';
-import { segments, contactSegment } from '../../drizzle/schema';
+import { segments, contactSegment } from '@repo/core/schema';
 import {
   loadSegment,
   buildMembershipClause,
   countSegmentMembers,
   countRulePreview,
   RuleValidationError,
-} from '../lib/segment-query';
-import { parseRules, compileRules } from '../lib/rules';
-import { loadFieldDefinitions } from '../lib/custom-fields';
+} from '@repo/core/segment-query';
+import { parseRules, compileRules } from '@repo/core/rules';
+import { loadFieldDefinitions } from '@repo/core/custom-fields';
 
 /** Validate raw rules compile against the workspace field registry. */
 async function validateRules(workspaceId: string, rawRules: unknown): Promise<string | null> {

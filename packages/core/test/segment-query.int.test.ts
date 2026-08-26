@@ -3,17 +3,17 @@
 // all agree on exactly who is in a segment. Skipped unless TEST_DATABASE_URL.
 
 import { Pool } from 'pg';
-import { runMigrations } from '../lambda/lib/migrate';
+import { runMigrations } from '../src/migrate';
 import {
   loadSegment,
   countSegmentMembers,
   countRulePreview,
   RuleValidationError,
-} from '../lambda/lib/segment-query';
-import { countEligibleRecipients } from '../lambda/lib/campaign-launch';
-import { createDispatchStore } from '../lambda/dispatch/core/store';
-import { closePool } from '../lambda/lib/db';
-import { RuleGroup } from '../lambda/lib/rules';
+} from '../src/segment-query';
+import { countEligibleRecipients } from '../src/campaign-launch';
+import { createDispatchStore } from '../src/dispatch/store';
+import { closePool } from '../src/db';
+import { RuleGroup } from '../src/rules';
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 const describeDb = TEST_DATABASE_URL ? describe : describe.skip;

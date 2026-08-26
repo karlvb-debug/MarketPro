@@ -15,9 +15,9 @@ import { SQSEvent, SQSBatchResponse } from 'aws-lambda';
 // ============================================
 
 import { getPool } from './lib/db';
-import { getChannelPrice, settleMessageCharge, Channel } from './lib/billing';
-import { recordEngagement } from './lib/engagement';
-import { Logger } from './lib/logger';
+import { getChannelPrice, settleMessageCharge, Channel } from '@repo/core/billing';
+import { recordEngagement } from '@repo/core/engagement';
+import { Logger } from '@repo/core/logger';
 
 export interface BillingEvent {
   providerMessageId: string;

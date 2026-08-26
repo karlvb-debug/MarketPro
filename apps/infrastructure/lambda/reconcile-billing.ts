@@ -7,8 +7,8 @@
 // ============================================
 
 import { getPool } from './lib/db';
-import { releaseStaleAuthorizations } from './lib/billing';
-import { Logger } from './lib/logger';
+import { releaseStaleAuthorizations } from '@repo/core/billing';
+import { Logger } from '@repo/core/logger';
 
 const STALE_HOURS = 72;
 

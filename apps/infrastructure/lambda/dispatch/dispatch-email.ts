@@ -1,12 +1,12 @@
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../lib/db';
-import { emailTemplates } from '../../drizzle/schema';
-import { makeSqsHandler } from './core/engine';
-import { createDispatchStore } from './core/store';
-import { isRetryableError, errorCodeOf, RetryableDispatchError } from './core/errors';
-import { emailSuppressionHash, mergeTags } from './core/personalize';
-import { ChannelAdapter, SendResult } from './core/types';
+import { emailTemplates } from '@repo/core/schema';
+import { makeSqsHandler } from './sqs-handler';
+import { createDispatchStore } from '@repo/core/dispatch/store';
+import { isRetryableError, errorCodeOf, RetryableDispatchError } from '@repo/core/dispatch/errors';
+import { emailSuppressionHash, mergeTags } from '@repo/core/dispatch/personalize';
+import { ChannelAdapter, SendResult } from '@repo/core/dispatch/types';
 
 // SESv2: the Simple content type supports custom headers, which the v1
 // SendEmail API does not — required for RFC 8058 one-click unsubscribe.

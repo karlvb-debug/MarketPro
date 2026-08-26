@@ -1,11 +1,11 @@
-import { isWithinSendWindow, localHourIn } from '../lambda/dispatch/core/quiet-hours';
+import { isWithinSendWindow, localHourIn } from '@repo/core/dispatch/quiet-hours';
 import { detectKeyword, parseInboundSms } from '../lambda/inbound-sms';
 import {
   normalizeEmail,
   normalizePhone,
   normalizeContactRow,
   sanitizeCustomFields,
-} from '../lambda/lib/contact-validate';
+} from '@repo/core/contact-validate';
 
 describe('quiet hours (TCPA 8am-9pm local)', () => {
   // 2026-06-11 (EDT = UTC-4, PDT = UTC-7)

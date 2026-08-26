@@ -1,8 +1,8 @@
 // Migration runner integration tests. Skipped unless TEST_DATABASE_URL is set.
 
 import { Pool } from 'pg';
-import { runMigrations } from '../lambda/lib/migrate';
-import { MIGRATIONS } from '../database/migrations';
+import { runMigrations } from '../src/migrate';
+import { MIGRATIONS } from '../src/database/migrations';
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 const describeDb = TEST_DATABASE_URL ? describe : describe.skip;

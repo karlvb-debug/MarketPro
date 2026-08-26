@@ -8,9 +8,9 @@
 
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { getPool } from './lib/db';
-import { findDueCampaigns, launchCampaign, pauseCampaign } from './lib/campaign-launch';
-import { Channel } from './lib/billing';
-import { Logger } from './lib/logger';
+import { findDueCampaigns, launchCampaign, pauseCampaign } from '@repo/core/campaign-launch';
+import { Channel } from '@repo/core/billing';
+import { Logger } from '@repo/core/logger';
 
 const sqs = new SQSClient({});
 

@@ -8,8 +8,8 @@ import { SNSEvent } from 'aws-lambda';
 // ============================================
 
 import { getPool } from './lib/db';
-import { revokeConsent, restoreSmsConsent, phoneHashOf } from './lib/consent';
-import { Logger } from './lib/logger';
+import { revokeConsent, restoreSmsConsent, phoneHashOf } from '@repo/core/consent';
+import { Logger } from '@repo/core/logger';
 
 export type KeywordType = 'STOP' | 'HELP' | 'START' | null;
 

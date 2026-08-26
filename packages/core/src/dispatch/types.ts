@@ -1,4 +1,4 @@
-import { Logger } from '../../lib/logger';
+import { Logger } from '../logger';
 
 /** The contact fields dispatch needs (subset of the contacts table row). */
 export interface DispatchContact {

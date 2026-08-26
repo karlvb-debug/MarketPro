@@ -3,9 +3,9 @@
 // Skipped unless TEST_DATABASE_URL is set.
 
 import { Pool } from 'pg';
-import { runMigrations } from '../lambda/lib/migrate';
-import { executeRightToBeForgotten } from '../lambda/lib/gdpr';
-import { performUnsubscribe, revokeConsent, restoreSmsConsent, emailHashOf, phoneHashOf } from '../lambda/lib/consent';
+import { runMigrations } from '../src/migrate';
+import { executeRightToBeForgotten } from '../src/gdpr';
+import { performUnsubscribe, revokeConsent, restoreSmsConsent, emailHashOf, phoneHashOf } from '../src/consent';
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 const describeDb = TEST_DATABASE_URL ? describe : describe.skip;

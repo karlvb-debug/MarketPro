@@ -15,7 +15,7 @@ import {
   smsTemplates,
   callScripts,
   workspaceSettings,
-} from '../../drizzle/schema';
+} from '@repo/core/schema';
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   const userId = getUserId(event);

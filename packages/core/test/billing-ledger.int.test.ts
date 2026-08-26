@@ -3,7 +3,7 @@
 // locally: postgresql://marketpro:marketpro@localhost:5432/marketpro_test).
 
 import { Pool } from 'pg';
-import { runMigrations } from '../lambda/lib/migrate';
+import { runMigrations } from '../src/migrate';
 import {
   authorizeCampaignFunds,
   getChannelPrice,
@@ -11,7 +11,7 @@ import {
   releaseStaleAuthorizations,
   settleMessageCharge,
   DEFAULT_CHANNEL_PRICES,
-} from '../lambda/lib/billing';
+} from '../src/billing';
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 const describeDb = TEST_DATABASE_URL ? describe : describe.skip;

@@ -1,15 +1,14 @@
 import { and, eq, inArray, ne, sql } from 'drizzle-orm';
-import { getDb, getPool } from '../../lib/db';
-import { DEFAULT_CHANNEL_PRICES } from '../../lib/billing';
-import { buildMembershipClause, loadSegment, SegmentRow, MembershipClause } from '../../lib/segment-query';
-import { recordSent } from '../../lib/engagement';
+import { getDb, getPool } from '../db';
+import { DEFAULT_CHANNEL_PRICES } from '../billing';
+import { buildMembershipClause, loadSegment, SegmentRow, MembershipClause } from '../segment-query';
+import { recordSent } from '../engagement';
 import {
   campaigns,
-  contacts,
   campaignMessages,
   suppressionList,
   workspaceSettings,
-} from '../../../drizzle/schema';
+} from '../schema';
 import {
   ClaimedRecipient,
   DispatchCampaign,

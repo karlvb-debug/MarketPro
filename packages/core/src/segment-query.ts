@@ -3,7 +3,7 @@
 //
 // Static segments: membership is explicit rows in contact_segment.
 // Dynamic segments: membership is evaluated just-in-time from a stored rule
-// AST (lib/rules.ts) — never synced to contact_segment.
+// AST (rules.ts) — never synced to contact_segment.
 //
 // This module produces the membership predicate (a parameterized WHERE
 // fragment over `contacts c`) shared by:

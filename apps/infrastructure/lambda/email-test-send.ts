@@ -2,11 +2,11 @@ import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { and, eq } from 'drizzle-orm';
 import { getDb, respond, getWorkspaceId, getUserId, requireRole } from './lib/db';
-import { emailTemplates, workspaceSettings } from '../drizzle/schema';
-import { normalizeEmail } from './lib/contact-validate';
-import { mergeTags } from './dispatch/core/personalize';
-import { DispatchContact } from './dispatch/core/types';
-import { Logger } from './lib/logger';
+import { emailTemplates, workspaceSettings } from '@repo/core/schema';
+import { normalizeEmail } from '@repo/core/contact-validate';
+import { mergeTags } from '@repo/core/dispatch/personalize';
+import { DispatchContact } from '@repo/core/dispatch/types';
+import { Logger } from '@repo/core/logger';
 
 // ============================================
 // Email test send — POST /email/test-send { templateId, to }

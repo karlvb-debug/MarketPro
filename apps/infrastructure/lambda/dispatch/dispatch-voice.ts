@@ -4,13 +4,13 @@ import {
 } from '@aws-sdk/client-connectcampaigns';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../lib/db';
-import { callScripts } from '../../drizzle/schema';
-import { makeSqsHandler } from './core/engine';
-import { createDispatchStore } from './core/store';
-import { isRetryableError, errorCodeOf, RetryableDispatchError } from './core/errors';
-import { phoneSuppressionHash, toE164 } from './core/personalize';
-import { isWithinSendWindow } from './core/quiet-hours';
-import { ChannelAdapter, ClaimedRecipient, SendResult } from './core/types';
+import { callScripts } from '@repo/core/schema';
+import { makeSqsHandler } from './sqs-handler';
+import { createDispatchStore } from '@repo/core/dispatch/store';
+import { isRetryableError, errorCodeOf, RetryableDispatchError } from '@repo/core/dispatch/errors';
+import { phoneSuppressionHash, toE164 } from '@repo/core/dispatch/personalize';
+import { isWithinSendWindow } from '@repo/core/dispatch/quiet-hours';
+import { ChannelAdapter, ClaimedRecipient, SendResult } from '@repo/core/dispatch/types';
 
 const campaignsClient = new ConnectCampaignsClient({});
 

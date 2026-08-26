@@ -7,8 +7,8 @@
 // ============================================
 
 import { getPool } from './lib/db';
-import { runMigrations } from './lib/migrate';
-import { Logger } from './lib/logger';
+import { runMigrations } from '@repo/core/migrate';
+import { Logger } from '@repo/core/logger';
 
 export const handler = async () => {
   const logger = new Logger({ handler: 'db-migrate' });

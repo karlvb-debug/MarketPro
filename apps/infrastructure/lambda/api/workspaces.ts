@@ -9,7 +9,7 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { eq, and } from 'drizzle-orm';
 import { getDb, respond, getUserId, getWorkspaceId, requireRole } from '../lib/db';
-import { workspaces, usersWorkspaces } from '../../drizzle/schema';
+import { workspaces, usersWorkspaces } from '@repo/core/schema';
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   const method = event.httpMethod;

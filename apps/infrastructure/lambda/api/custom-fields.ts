@@ -11,7 +11,7 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { getPool, respond, getWorkspaceId, getUserId, requireRole } from '../lib/db';
-import { deriveKey, isValidKey, CustomFieldType } from '../lib/custom-fields';
+import { deriveKey, isValidKey, CustomFieldType } from '@repo/core/custom-fields';
 
 const TYPES: CustomFieldType[] = ['text', 'number', 'date', 'email', 'phone', 'url', 'select'];
 

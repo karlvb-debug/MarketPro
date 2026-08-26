@@ -1,73 +1,16 @@
 // ============================================
-// Shared DB connection — cold-start optimized
-// Reads credentials from Secrets Manager, connects to RDS
+// AWS adapter for the shared DB/auth surface.
+//
+// The connection pool and the role hierarchy live in @repo/core; what remains
+// here is the API Gateway shaping — reading identity off the authorizer
+// context and formatting Lambda proxy responses. M3 replaces this file with
+// Next route-handler equivalents; nothing below is portable.
 // ============================================
 
-import { Pool } from 'pg';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import * as schema from '../../drizzle/schema';
+import { roleMeetsMin, type Role } from '@repo/core/db';
 
-let pool: Pool | null = null;
-let db: ReturnType<typeof drizzle> | null = null;
-
-/**
- * Resolve the Postgres connection string: Secrets Manager in production
- * (DATABASE_SECRET_ARN + DATABASE_HOST), DATABASE_URL for local dev.
- */
-async function buildConnectionString(): Promise<string> {
-  const secretArn = process.env.DATABASE_SECRET_ARN;
-  const dbHost = process.env.DATABASE_HOST;
-  const dbName = process.env.DATABASE_NAME || 'marketingsaas';
-
-  if (secretArn) {
-    const { SecretsManagerClient, GetSecretValueCommand } = await import('@aws-sdk/client-secrets-manager');
-    const smClient = new SecretsManagerClient({});
-    const secret = await smClient.send(new GetSecretValueCommand({ SecretId: secretArn }));
-    const creds = JSON.parse(secret.SecretString || '{}');
-    return `postgresql://${creds.username}:${encodeURIComponent(creds.password)}@${dbHost || creds.host}:${creds.port || 5432}/${dbName}`;
-  }
-  // Fallback: use DATABASE_URL directly (for local dev)
-  return process.env.DATABASE_URL || '';
-}
-
-/**
- * Shared pg connection pool, reused across warm Lambda invocations.
- * Used directly by handlers that issue raw SQL (e.g. the authorizer);
- * everything else should go through getDb().
- */
-export async function getPool(): Promise<Pool> {
-  if (pool) return pool;
-
-  const connectionString = await buildConnectionString();
-  pool = new Pool({
-    connectionString,
-    max: 1,              // Lambda = 1 concurrent connection per invocation
-    idleTimeoutMillis: 60000,
-    connectionTimeoutMillis: 10000,
-    ssl: connectionString.includes('localhost') ? undefined : { rejectUnauthorized: false },
-  });
-  return pool;
-}
-
-/** Close the shared pool (tests only — Lambdas keep it warm). */
-export async function closePool(): Promise<void> {
-  if (pool) {
-    await pool.end();
-    pool = null;
-    db = null;
-  }
-}
-
-/**
- * Returns a Drizzle ORM client connected to the RDS instance.
- * Reuses the connection pool across Lambda invocations (warm starts).
- * Reads credentials from the DATABASE_SECRET_ARN environment variable.
- */
-export async function getDb() {
-  if (db) return db;
-  db = drizzle(await getPool(), { schema });
-  return db;
-}
+export { getPool, getDb, closePool, methodToAction } from '@repo/core/db';
+export type { Role } from '@repo/core/db';
 
 /**
  * Standard API Gateway response helper
@@ -102,14 +45,6 @@ export function getUserId(event: any): string | null {
   return event.requestContext?.authorizer?.principalId || null;
 }
 
-// ============================================
-// RBAC Helpers
-// ============================================
-
-/** Permission hierarchy — higher index = more permissions */
-const ROLE_HIERARCHY = ['viewer', 'editor', 'admin', 'owner', 'super_admin'] as const;
-type Role = typeof ROLE_HIERARCHY[number];
-
 /**
  * Extract the tenant role from the authorizer context.
  * Returns the role string injected by the authorizer Lambda.
@@ -132,10 +67,7 @@ export function isSuperAdmin(event: any): boolean {
  * Hierarchy: viewer < editor < admin < owner < super_admin
  */
 export function hasMinRole(event: any, minRole: Role): boolean {
-  const callerRole = getTenantRole(event) as Role;
-  const callerLevel = ROLE_HIERARCHY.indexOf(callerRole);
-  const requiredLevel = ROLE_HIERARCHY.indexOf(minRole);
-  return callerLevel >= requiredLevel;
+  return roleMeetsMin(getTenantRole(event), minRole);
 }
 
 /**
@@ -150,17 +82,4 @@ export function requireRole(event: any, minRole: Role) {
     });
   }
   return null; // Authorized
-}
-
-/**
- * Map HTTP methods to action categories for audit logging.
- */
-export function methodToAction(method: string): string {
-  switch (method.toUpperCase()) {
-    case 'GET': return 'READ';
-    case 'POST': return 'WRITE';
-    case 'PUT': case 'PATCH': return 'WRITE';
-    case 'DELETE': return 'DELETE';
-    default: return 'READ';
-  }
 }

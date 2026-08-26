@@ -3,8 +3,8 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import csv from 'csv-parser';
 import { eq, sql } from 'drizzle-orm';
 import { getDb } from './lib/db';
-import { normalizeContactRow } from './lib/contact-validate';
-import { contacts, contactSegment } from '../drizzle/schema';
+import { normalizeContactRow } from '@repo/core/contact-validate';
+import { contacts, contactSegment } from '@repo/core/schema';
 import { Readable } from 'stream';
 
 const s3Client = new S3Client({});

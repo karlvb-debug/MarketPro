@@ -1,8 +1,9 @@
 # CLAUDE.md — MarketPro
 
-Multi-channel marketing platform (email MVP). Turborepo: `apps/frontend`
-(Next.js 16, React 19) + `apps/infrastructure` (AWS CDK, Lambda, Drizzle/RDS
-Postgres). Architecture: `architecture_plan.md`. Status & roadmap:
+Multi-channel marketing platform (email MVP). Turborepo: `packages/core`
+(portable domain logic + schema + migrations), `apps/frontend` (Next.js 16,
+React 19) + `apps/infrastructure` (AWS CDK, Lambda — being retired, see
+`docs/plans/aws-exit.md`). Architecture: `architecture_plan.md`. Status & roadmap:
 `FOUNDATION_REVIEW.md`. Active plans: `docs/plans/`.
 
 > Sessions are ephemeral (fresh clone). Nothing survives but the repo — commit
@@ -28,26 +29,44 @@ TEST_DATABASE_URL=postgresql://marketpro:marketpro@localhost:5432/marketpro_test
 - Integration tests run against **real Postgres**, never a mock. Pattern:
   `runMigrations(pool)` in `beforeAll`, a fresh workspace per test for
   isolation, `closePool()` in `afterAll` if the code under test uses the
-  shared singleton pool (`lib/db`). See `test/*.int.test.ts`.
+  shared singleton pool (`@repo/core/db`). See `packages/core/test/*.int.test.ts`.
 - Pure logic (rule compiler, CSV escaping, error triage, validators) has
   fast unit tests with a hostile-input section where untrusted input enters.
-- CDK stacks have assertion tests (`test/infrastructure.test.ts`); bundling is
+- CDK stacks have assertion tests (`apps/infrastructure/test/infrastructure.test.ts`); bundling is
   skipped via the test App context.
+
+## Package boundary — `packages/core` vs `apps/infrastructure`
+
+`@repo/core` holds everything portable: it depends on Postgres and nothing
+else, and has **zero** AWS imports. Both the Lambda handlers today and the Next
+route handlers after M3 import the one copy.
+
+- Domain logic, schema, and migrations go in `packages/core/src/`. If you find
+  yourself adding an `@aws-sdk/*` or `aws-lambda` import there, it belongs in
+  an adapter instead.
+- `apps/infrastructure` is the AWS adapter layer (CDK stacks, handler shims,
+  `lambda/lib/db.ts` API-Gateway helpers, `lambda/dispatch/sqs-handler.ts`).
+  It is scheduled for deletion — don't grow it.
+- The dispatch engine is transport-agnostic on purpose: `processCampaignDispatch`
+  takes a `requeue` callback and a time budget. SQS today, cron/pg-boss next;
+  the engine itself must not learn about either.
 
 ## Load-bearing invariants — violating these causes real bugs
 
 - **Rule engine is the only query path** for contact filtering / segments /
-  bulk selection / export (`lambda/lib/rules.ts`). It's a whitelist AST→SQL
+  bulk selection / export (`packages/core/src/rules.ts`). It's a whitelist AST→SQL
   compiler; values are **always bound parameters**. Never build a parallel
   query string or interpolate user input — that reintroduces injection.
-- **Migrations are append-only.** Add `database/migrations/NNNN-*.ts` and
+- **Migrations are append-only.** Add
+  `packages/core/src/database/migrations/NNNN-*.ts` and
   register it in `index.ts`; never edit an applied migration. They run
   automatically on deploy via a CDK Trigger; the runner is transactional and
   advisory-locked.
 - **Dispatch is claim-before-send / exactly-once.** A unique
   `(campaign_id, contact_id)` claim row is inserted before the provider call,
   so redelivery/continuation never double-sends. Retryable errors propagate
-  (SQS→DLQ); per-recipient errors are recorded and the campaign continues.
+  (transport retry → dead-letter); per-recipient errors are recorded and the
+  campaign continues.
   Quiet-hours skips self-heal via delayed re-queue. Don't bypass the claim.
 - **Billing authorizes then settles.** Campaign launch places an atomic
   authorization hold (insufficient funds → 402); delivery/bounce events
@@ -61,8 +80,9 @@ TEST_DATABASE_URL=postgresql://marketpro:marketpro@localhost:5432/marketpro_test
 
 ## Secrets & hygiene
 
-- DB/Stripe creds come from **Secrets Manager** at runtime
-  (`DATABASE_SECRET_ARN`, etc.) — never plaintext env vars, never in code.
+- The DB connection is `DATABASE_URL`, supplied by the platform's own secret
+  store (Vercel/Supabase env). Stripe creds likewise. **Never** hardcode a
+  credential or commit one; `@repo/core/db` fails fast if `DATABASE_URL` is unset.
 - **Never commit** `cdk-outputs.json` (real account/resource IDs) or `.bak`
   files; both are gitignored.
 

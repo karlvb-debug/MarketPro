@@ -10,9 +10,9 @@ import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { eq } from 'drizzle-orm';
 import { getDb, getPool, respond, getWorkspaceId, getUserId, requireRole } from '../lib/db';
-import { launchCampaign } from '../lib/campaign-launch';
-import { Channel } from '../lib/billing';
-import { campaigns } from '../../drizzle/schema';
+import { launchCampaign } from '@repo/core/campaign-launch';
+import { Channel } from '@repo/core/billing';
+import { campaigns } from '@repo/core/schema';
 
 const sqs = new SQSClient({});
 

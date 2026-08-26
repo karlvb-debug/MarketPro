@@ -1,6 +1,6 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import Stripe from 'stripe';
-import { accountBalances, transactionsLedger } from '../drizzle/schema';
+import { accountBalances, transactionsLedger } from '@repo/core/schema';
 import { sql } from 'drizzle-orm';
 import { getDb } from './lib/db';
 

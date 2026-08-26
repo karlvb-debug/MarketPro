@@ -8,8 +8,8 @@ import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 // ============================================
 
 import { getPool } from './lib/db';
-import { performUnsubscribe } from './lib/consent';
-import { Logger } from './lib/logger';
+import { performUnsubscribe } from '@repo/core/consent';
+import { Logger } from '@repo/core/logger';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

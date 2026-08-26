@@ -129,7 +129,7 @@ export const segments = pgTable('segments', {
   sortOrder: integer('sort_order').default(0),
   color: varchar('color', { length: 20 }),
   kind: segmentKindEnum('kind').notNull().default('static'),  // 'static' = contact_segment rows; 'dynamic' = rules
-  rules: jsonb('rules'),                                       // Rule AST for dynamic segments (see lib/rules.ts)
+  rules: jsonb('rules'),                                       // Rule AST for dynamic segments (see rules.ts)
   cachedCount: integer('cached_count'),                       // Last computed membership count
   countRefreshedAt: timestamp('count_refreshed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

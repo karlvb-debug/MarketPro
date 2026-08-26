@@ -10,7 +10,7 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { eq, and } from 'drizzle-orm';
 import { getDb, respond, getWorkspaceId, getUserId, requireRole } from '../lib/db';
-import { emailTemplates, smsTemplates, callScripts } from '../../drizzle/schema';
+import { emailTemplates, smsTemplates, callScripts } from '@repo/core/schema';
 
 // Map URL type to Drizzle table + ID column name
 function getTable(type: string) {
