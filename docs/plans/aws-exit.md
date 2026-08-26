@@ -1,6 +1,6 @@
 # AWS Exit — Vercel + Supabase + Twilio
 
-> Status: **M1 complete · M3 server-side complete** · Created August 25, 2026 · Updated August 26, 2026
+> Status: **M1 complete · M2 schema live · M3 server-side complete** · Created August 25, 2026 · Updated August 26, 2026
 > Goal: run the whole product on Vercel + Supabase + Twilio with near-zero
 > idle cost, preserving every load-bearing invariant and the 156-test suite.
 > Trigger: the AWS account was closed when free credits ran out. Idle burn was
@@ -65,6 +65,43 @@ query paths *and* collide with the rule engine's compiled SQL.
 role; existing workspace scoping stays exactly as-is and stays tested.
 **Later:** add RLS as defense-in-depth, once the port is green.
 
+> ### Amended August 26, 2026 — this decision had a hole, now closed
+>
+> The reasoning above is sound but rested on an assumption that RDS made true
+> and Supabase does not: *that the API is the only route to the database*. On
+> RDS the instance sat in a VPC. **Supabase publishes the `public` schema over
+> PostgREST**, and the publishable (anon) key is public by design — it ships in
+> the browser bundle. So every table was a second, unguarded route to the same
+> data: contacts, the billing ledger, consent records, the audit log.
+>
+> Supabase's own linter flagged all 27 tables at **ERROR** level
+> (`rls_disabled_in_public`, `facing: EXTERNAL`). The live exploit check
+> against the REST endpoint could not be run from the build sandbox — its
+> egress proxy denied the request with a 403 policy error — so this rests on
+> the linter plus documented PostgREST behaviour, not on a demonstrated read.
+>
+> **Fix (migration `0007-enable-rls`): RLS enabled on all tables with *no*
+> policies.** `anon` and `authenticated` can reach nothing over REST;
+> `service_role` holds `BYPASSRLS`, so the route handlers keep running the
+> exact workspace-scoped queries the integration suite already covers.
+>
+> This *upholds* the decision rather than reversing it. RLS here is a deny-all
+> gate on a door Supabase opens, not the tenant-isolation mechanism — no tested
+> query path changed, and the rule engine's compiled SQL is untouched. Verified
+> empirically: `service_role` sees seeded rows, `anon` and `authenticated` see
+> zero.
+>
+> **Consequence for new tables:** a table added without RLS is publicly
+> readable the moment it exists. Migration 0007 loops over `pg_tables`, so
+> re-running it covers new tables, but any migration that adds one should
+> enable RLS in the same migration.
+>
+> **Caveat on test coverage:** the local suite cannot catch an RLS regression.
+> It passes because the test role *owns* the tables (owners bypass RLS;
+> `rolbypassrls` is false), which is a different mechanism from `service_role`'s
+> `BYPASSRLS` on Supabase. Same outcome, different reason — so green tests are
+> not evidence the gate is intact. Check `get_advisors` after any DDL change.
+
 ---
 
 ## 4. Phases
@@ -127,24 +164,50 @@ What landed:
 > `test/infrastructure.test.ts` still asserts no plaintext `DATABASE_URL` in
 > Lambda env and still passes.
 
-### M2 — Database on Supabase (~1 day) — *blocked on the DB password*
-- Run the 6 append-only migrations against Supabase (runner is transactional +
-  advisory-locked; do not edit applied migrations — add new ones).
-- Point `TEST_DATABASE_URL` at Supabase; run the full suite.
-- Use **Supavisor transaction mode** from Vercel; direct pooled conn elsewhere.
+### M2 — Database on Supabase — ✅ **schema live and verified**
 
-> Both steps need a direct Postgres connection, which needs the database
-> password. Supabase generates it at project creation and never returns it
-> through the API, so it has to be set once in the dashboard
-> (Project Settings → Database → Reset database password).
->
-> Running the migrations by pasting their SQL through the Management API was
-> considered and rejected: the baseline alone is 16.6KB, and hand-transmitting
-> it risks a silent transcription error in the schema. `apply_migration` was
-> rejected too — it keeps its own `supabase_migrations.schema_migrations`
-> table, which would leave two competing sources of truth against our own
-> `public.schema_migrations`. The tested runner stays the only thing that
-> writes the schema.
+All 7 migrations are applied to `MarketPro` (`cxdmbpyuoptmjmnuuldq`,
+Postgres 17.6) and recorded in `public.schema_migrations`.
+
+**Postgres 16 → 17 parity is proven, not assumed.** A schema fingerprint over
+`information_schema.columns`, `pg_constraint`, `pg_indexes`, enum values and
+`relrowsecurity` is **byte-identical** between the local Postgres 16 database
+and Supabase Postgres 17: 411 lines, md5 `8ec8c65b16e33a79579b0922b3f4f024`.
+
+#### How they were applied, and why not with the runner
+
+The build sandbox permits **HTTPS egress only** — port 443 is open, 5432 and
+6543 time out at TCP connect. No credential would have worked from there, so
+the tested `runMigrations()` runner could not reach Supabase. (The direct host
+`db.<ref>.supabase.co` is also IPv6-only now; the IPv4 pooler is the
+general-purpose answer, but both ports are blocked here regardless.)
+
+The migrations therefore went through the Management API over HTTPS. To make
+that safe rather than hopeful, each migration was wrapped in a `DO` block that
+**verifies an md5 of the SQL before executing it** and aborts the transaction
+on mismatch, then records the id — reproducing the runner's per-migration
+transactional behaviour. The technique was validated against a local scratch
+database first: it produced a schema byte-identical to the real runner's
+(451 lines, same md5), so it is equivalent, not merely plausible.
+
+`apply_migration` was rejected: it maintains its own
+`supabase_migrations.schema_migrations`, which would leave two competing
+sources of truth against ours.
+
+#### Still open on M2
+
+- **The test suite has not been run against Supabase.** It needs a real
+  Postgres socket (`new Pool({connectionString})`), which the sandbox cannot
+  open. This has to run from a machine with 5432/6543 egress, or in CI, with
+  `TEST_DATABASE_URL` pointed at Supabase — ideally a branch, since the suite
+  writes freely and would otherwise pollute the live database.
+- **Connection mode matters and is now a hard constraint.** `runMigrations()`
+  takes a session-scoped `pg_advisory_lock`, so migrations must use the
+  **session** pooler (5432); transaction mode will not hold it. Vercel's
+  serverless functions still want **transaction** mode (6543) as planned.
+- `pg_trgm` is installed in `public` (Supabase lints this at WARN). Moving it
+  is deferred: the trigram indexes depend on it, so relocation needs its own
+  migration and verification rather than a casual `ALTER EXTENSION`.
 
 ### M3 — API: Lambda handlers → Next route handlers — ✅ **server-side done**
 

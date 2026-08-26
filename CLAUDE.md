@@ -89,6 +89,14 @@ route handlers after M3 import the one copy.
 - **Tenant isolation**: every query is workspace-scoped; the authorizer
   injects the role. Contact FKs are `SET NULL` (anonymize, keep aggregates)
   except `contact_segment` (CASCADE) — GDPR erasure and merge depend on this.
+- **Every table needs RLS enabled on Supabase.** PostgREST publishes the
+  `public` schema and the anon key is public, so a table without RLS is
+  world-readable. Migration `0007-enable-rls` enables it with *no* policies —
+  a deny-all gate, not the isolation mechanism (`service_role` has
+  `BYPASSRLS`, so route handlers are unaffected). **A migration that adds a
+  table must enable RLS on it.** The local suite will *not* catch this: tests
+  pass because the test role owns the tables, which bypasses RLS for a
+  different reason. Run `get_advisors` after DDL changes.
 
 ## Secrets & hygiene
 
