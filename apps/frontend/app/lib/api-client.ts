@@ -78,7 +78,7 @@ export type BulkSelection = { contactIds: string[] } | { rules: unknown };
 
 /**
  * Selection scope for an export job. Mirrors the backend Selection union
- * (lambda/lib/bulk.ts): explicit ids, a rule tree, or the entire workspace.
+ * (@repo/core/bulk): explicit ids, a rule tree, or the entire workspace.
  */
 export type ExportSelection = { contactIds: string[] } | { rules: unknown } | { all: true };
 
@@ -125,10 +125,6 @@ async function apiFetch<T>(
   body?: unknown,
   retries = 2,
 ): Promise<T> {
-  if (!config.apiUrl) {
-    throw { status: 0, message: 'API not configured. Set NEXT_PUBLIC_API_URL in .env.local.' } as ApiError;
-  }
-
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -143,9 +139,9 @@ async function apiFetch<T>(
     }
   }
 
-  // Attach workspace isolation header
-  // API Gateway Request Authorizer requires X-Workspace-Id as an Identity Source to cache properly.
-  // If we don't have a workspace yet, or we're in offline mode ('ws_acme'), send the global UUID.
+  // Attach workspace isolation header. The server resolves the caller's role
+  // in this workspace; the all-zero UUID means "no active workspace yet"
+  // (used by /workspaces itself, and by offline mode's 'ws_acme').
   if (currentWorkspaceId && currentWorkspaceId !== 'ws_acme') {
     headers['X-Workspace-Id'] = currentWorkspaceId;
   } else {

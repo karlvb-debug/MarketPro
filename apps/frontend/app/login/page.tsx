@@ -75,7 +75,7 @@ export default function LoginPage() {
 
   const displayError = localError || error;
 
-  if (!config.isApiConfigured) {
+  if (!config.isAuthConfigured) {
     return (
       <div className="login-page">
         <div className="login-card">
@@ -85,14 +85,13 @@ export default function LoginPage() {
           </div>
           <div className="login-setup-notice">
             <div className="login-setup-icon">⚙</div>
-            <h2>Backend Not Configured</h2>
-            <p>Set the following environment variables in <code>.env.local</code> to connect to AWS:</p>
+            <h2>Auth Not Configured</h2>
+            <p>The API ships with this app, but signing in needs an auth provider. Set these in <code>.env.local</code>:</p>
             <div className="login-env-list">
-              <code>NEXT_PUBLIC_API_URL</code>
-              <code>NEXT_PUBLIC_COGNITO_USER_POOL_ID</code>
-              <code>NEXT_PUBLIC_COGNITO_CLIENT_ID</code>
+              <code>NEXT_PUBLIC_SUPABASE_URL</code>
+              <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>
             </div>
-            <p className="login-setup-hint">These values come from your CDK stack outputs after running <code>cdk deploy</code>.</p>
+            <p className="login-setup-hint">These come from your Supabase project settings. Until then the app runs against local sample data.</p>
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 # AWS Exit — Vercel + Supabase + Twilio
 
-> Status: **M1 complete** · Created August 25, 2026 · Updated August 26, 2026
+> Status: **M1 complete · M3 server-side complete** · Created August 25, 2026 · Updated August 26, 2026
 > Goal: run the whole product on Vercel + Supabase + Twilio with near-zero
 > idle cost, preserving every load-bearing invariant and the 156-test suite.
 > Trigger: the AWS account was closed when free credits ran out. Idle burn was
@@ -125,14 +125,79 @@ What landed:
 - Point `TEST_DATABASE_URL` at a Supabase branch; run the full suite.
 - Use **Supavisor transaction mode** from Vercel; direct pooled conn elsewhere.
 
-### M3 — API: Lambda handlers → Next route handlers (~3–4 days)
-9 handlers port to App Router routes: `batch, campaigns, contacts,
-custom-fields, segments, settings, templates, views, workspaces`.
-- `authorizer.ts` → Supabase Auth session; keep injecting role + workspace id
-  into the same call signatures the lib functions already expect.
-- Frontend: repoint `NEXT_PUBLIC_API_URL` (single env var) or move to relative
-  routes. Frontend has ~zero AWS coupling — store slices are untouched.
-- **Keep `useStore()` slice return shapes byte-stable.**
+### M3 — API: Lambda handlers → Next route handlers — ✅ **server-side done**
+
+All nine handlers (`batch, campaigns, contacts, custom-fields, segments,
+settings, templates, views, workspaces`) are ported to transport-neutral
+functions in `@repo/core/api/*`, exposed as **27 Next route handlers**.
+
+The decomposition follows M1's: the old authorizer did two things, and only
+one was vendor-specific.
+
+- `@repo/core/api/context` — `RequestContext {userId, workspaceId, role,
+  isSuperAdmin}` and `resolveRequestContext`, reproducing the authorizer's
+  rules exactly (global/absent workspace, super-admin impersonation,
+  `users_workspaces` lookup, graceful deny on malformed UUIDs).
+- `@repo/core/api/result` — `ApiResult {status, body}` plus
+  `requireRole`/`requireWorkspace`. Knows nothing about API Gateway or Next.
+- `@repo/core/api/input` — typed readers for untrusted JSON bodies.
+- `apps/frontend/app/api/_lib` — the Next adapter: an `AuthProvider`
+  interface with a Supabase implementation (bearer token verified with the
+  service role; super-admin read from `app_metadata`, which users cannot
+  write to, rather than self-writable `user_metadata`), and `withContext()`.
+
+Remaining AWS couplings were **inverted, not reimplemented**:
+
+| Was | Now |
+|---|---|
+| SQS client in `campaigns` | `CampaignDeps.enqueue` callback |
+| S3 presign in `contacts` | `ContactsDeps.presignUpload/presignDownload` |
+| Lambda invoke for export | `ContactsDeps.startExport` |
+| APIGW event for audit log | `RequestMeta {ip, userAgent, path}` |
+
+The Next routes pass these **unwired on purpose**: dispatch moves to pg-boss
+in M4 and storage to Supabase Storage in M6. An absent dependency behaves
+exactly as a missing queue-URL/bucket env var did before — no URL is ever
+fabricated.
+
+Frontend: `config.apiUrl` now defaults to the relative `/api`, so the API
+ships with the app; `NEXT_PUBLIC_API_URL` remains an override. `isApiConfigured`
+became `isAuthConfigured` (the API is always present now; what gates real mode
+is having an auth provider). **`useStore()` slice shapes are untouched** — the
+api-client's paths and payload shapes are unchanged, so no store slice moved.
+
+#### Typing the handlers found four latent 500s
+
+The Lambda handlers read request bodies off `any` and were never linted or
+type-checked (infrastructure's tsconfig excludes `test/`, and it has no lint
+script). Porting them into a linted, type-checked package turned four opaque
+500s into correct 4xx responses:
+
+1. `campaigns.templateId` / `segmentId` are `NOT NULL`, but the handler
+   inserted whatever the body held → Postgres error as a 500. Now a 400.
+2. `contacts.consent_source` is an enum column written through unvalidated →
+   500 on any unrecognised string. Now simply not set.
+3. `contacts.status` on PUT, same enum problem → 500. Now a 400 naming the
+   accepted values.
+4. Import rows were passed to `normalizeContactRow` without checking they were
+   objects, so a CSV payload containing a bare string threw.
+
+Accepted enum values are read from the schema's own `pgEnum` definitions, so
+they cannot drift from the database constraint.
+
+#### Still open on M3
+
+- **Client-side auth swap (Cognito → Supabase).** `app/lib/auth.tsx` is still
+  a 246-line Cognito provider. The server accepts Supabase tokens today; the
+  browser still mints Cognito ones. This is **blocked on M0** — writing it
+  without a Supabase project to authenticate against would be unverifiable,
+  and login is not something to ship untested.
+- **The Lambda handlers still hold their original copies of this logic.** They
+  were left intact rather than made to delegate, so `apps/infrastructure` and
+  `@repo/core/api` now describe the same behaviour twice. The AWS account is
+  closed and M7 deletes those handlers, so nothing calls them — but until then
+  treat `@repo/core/api` as the only live copy and do not edit the Lambda
+  versions.
 
 ### M4 — Dispatch on cron + Twilio (~3–4 days)
 - Add **pg-boss** in Supabase. Implement `requeue` as

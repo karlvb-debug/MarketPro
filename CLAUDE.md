@@ -46,7 +46,18 @@ route handlers after M3 import the one copy.
   an adapter instead.
 - `apps/infrastructure` is the AWS adapter layer (CDK stacks, handler shims,
   `lambda/lib/db.ts` API-Gateway helpers, `lambda/dispatch/sqs-handler.ts`).
-  It is scheduled for deletion — don't grow it.
+  It is scheduled for deletion — don't grow it. Its `lambda/api/*` handlers
+  still contain pre-M3 copies of logic that now lives in `@repo/core/api/*`;
+  **`@repo/core/api` is the live copy** — edit that, never the Lambda version.
+- HTTP lives in `packages/core/src/api/`: handlers are
+  `(ctx: RequestContext, input) => Promise<ApiResult>`, with side-effects that
+  differ per platform (queue, object storage, async workers) taken as injected
+  deps. Next route handlers in `apps/frontend/app/api/**` are thin adapters
+  over them — put logic in core, not in a route file.
+- Read untrusted request bodies through `@repo/core/api/input`
+  (`str`/`num`/`bool`/`obj`/`strArray`), never off an `any`. Validate against
+  the schema's own `pgEnum` values so accepted input can't drift from the
+  database constraint.
 - The dispatch engine is transport-agnostic on purpose: `processCampaignDispatch`
   takes a `requeue` callback and a time budget. SQS today, cron/pg-boss next;
   the engine itself must not learn about either.
