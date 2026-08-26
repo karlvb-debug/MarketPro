@@ -69,10 +69,18 @@ role; existing workspace scoping stays exactly as-is and stays tested.
 
 ## 4. Phases
 
-### M0 — Accounts & decisions (~0.5 day) — *partially done*
-- ☐ Supabase project, Vercel project, Twilio account (+ SendGrid for email).
-- ☐ Recreate the 4 secrets as env vars: Stripe secret, Stripe webhook secret,
-  DB URL, Twilio creds. **No plaintext in code.**
+### M0 — Accounts & decisions (~0.5 day) — *in progress*
+- ☑ **Supabase project created**: `MarketPro` (`cxdmbpyuoptmjmnuuldq`),
+  region `us-east-1`, **Postgres 17.6**, on the `Karl's Pro` org
+  ($10/mo additional-project compute). Note the version gap: local tests run
+  against Postgres 16, so M2 must confirm the migrations apply cleanly on 17
+  rather than assume it.
+- ☐ Vercel project, Twilio account (+ SendGrid for email).
+- ☐ Secrets as env vars — see `apps/frontend/.env.example` for the contract.
+  Two are dashboard-only and cannot be read back through the Management API:
+  the **database password** (needed for `DATABASE_URL`) and the
+  **service-role key** (needed by the route handlers to verify tokens).
+  **No plaintext in code.**
 - ☑ Clear `cdk.context.json` (cached AZ lookups pinned dead account
   185011027929) — now `{}`.
 
@@ -119,11 +127,24 @@ What landed:
 > `test/infrastructure.test.ts` still asserts no plaintext `DATABASE_URL` in
 > Lambda env and still passes.
 
-### M2 — Database on Supabase (~1 day)
+### M2 — Database on Supabase (~1 day) — *blocked on the DB password*
 - Run the 6 append-only migrations against Supabase (runner is transactional +
   advisory-locked; do not edit applied migrations — add new ones).
-- Point `TEST_DATABASE_URL` at a Supabase branch; run the full suite.
+- Point `TEST_DATABASE_URL` at Supabase; run the full suite.
 - Use **Supavisor transaction mode** from Vercel; direct pooled conn elsewhere.
+
+> Both steps need a direct Postgres connection, which needs the database
+> password. Supabase generates it at project creation and never returns it
+> through the API, so it has to be set once in the dashboard
+> (Project Settings → Database → Reset database password).
+>
+> Running the migrations by pasting their SQL through the Management API was
+> considered and rejected: the baseline alone is 16.6KB, and hand-transmitting
+> it risks a silent transcription error in the schema. `apply_migration` was
+> rejected too — it keeps its own `supabase_migrations.schema_migrations`
+> table, which would leave two competing sources of truth against our own
+> `public.schema_migrations`. The tested runner stays the only thing that
+> writes the schema.
 
 ### M3 — API: Lambda handlers → Next route handlers — ✅ **server-side done**
 
