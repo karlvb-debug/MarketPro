@@ -213,12 +213,13 @@ they cannot drift from the database constraint.
   browser still mints Cognito ones. This is **blocked on M0** — writing it
   without a Supabase project to authenticate against would be unverifiable,
   and login is not something to ship untested.
-- **The Lambda handlers still hold their original copies of this logic.** They
-  were left intact rather than made to delegate, so `apps/infrastructure` and
-  `@repo/core/api` now describe the same behaviour twice. The AWS account is
-  closed and M7 deletes those handlers, so nothing calls them — but until then
-  treat `@repo/core/api` as the only live copy and do not edit the Lambda
-  versions.
+- ~~The Lambda handlers still hold their original copies of this logic.~~
+  **Closed.** The nine handlers are now thin adapters over `@repo/core/api`
+  (**1,947 → 371 lines**), so there is exactly one implementation. Each keeps
+  only its genuinely AWS-specific side-effects: the SQS sender in `campaigns`,
+  and S3 presigning plus the export-worker invocation in `contacts`.
+  `lambda/lib/adapt.ts` translates an API Gateway event into a
+  `RequestContext` and an `ApiResult` back into a proxy response.
 
 ### M4 — Dispatch on cron + Twilio (~3–4 days)
 - Add **pg-boss** in Supabase. Implement `requeue` as

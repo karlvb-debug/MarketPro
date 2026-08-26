@@ -47,8 +47,9 @@ route handlers after M3 import the one copy.
 - `apps/infrastructure` is the AWS adapter layer (CDK stacks, handler shims,
   `lambda/lib/db.ts` API-Gateway helpers, `lambda/dispatch/sqs-handler.ts`).
   It is scheduled for deletion — don't grow it. Its `lambda/api/*` handlers
-  still contain pre-M3 copies of logic that now lives in `@repo/core/api/*`;
-  **`@repo/core/api` is the live copy** — edit that, never the Lambda version.
+  are thin adapters over `@repo/core/api/*` (`lambda/lib/adapt.ts` does the
+  event↔`ApiResult` translation); the only logic left in them is the
+  AWS-specific side-effects they inject.
 - HTTP lives in `packages/core/src/api/`: handlers are
   `(ctx: RequestContext, input) => Promise<ApiResult>`, with side-effects that
   differ per platform (queue, object storage, async workers) taken as injected

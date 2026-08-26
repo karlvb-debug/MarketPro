@@ -39,12 +39,17 @@ function isCampaignStatus(v: string): v is CampaignStatus {
 
 /**
  * How this deployment hands a dispatch payload to its queue. SQS under
- * Lambda, pg-boss under Vercel Cron (M4). Undefined means the deployment
- * cannot dispatch the channel, in which case the campaign is created but not
- * launched — exactly what a missing queue URL used to do.
+ * Lambda, pg-boss under Vercel Cron (M4).
+ *
+ * `senderFor` is asked for a sender *before* the campaign is launched, and
+ * returning null means this deployment cannot dispatch that channel. That
+ * ordering matters: launching places an atomic billing hold and flips the
+ * campaign to 'sending', so a campaign that can never be queued must not be
+ * launched at all — otherwise it strands a hold against a send that will
+ * never happen. A missing queue URL had exactly this effect before.
  */
 export interface CampaignDeps {
-  enqueue?: (channel: Channel, payload: unknown) => Promise<void>;
+  senderFor?: (channel: Channel) => ((payload: unknown) => Promise<void>) | null;
 }
 
 export async function listCampaigns(ctx: RequestContext): Promise<ApiResult> {
@@ -111,7 +116,9 @@ export async function createCampaign(
   const campaign = row!;
   const channel = campaign.channel as Channel;
 
-  if (deps.enqueue && !isFutureSend) {
+  const send = deps.senderFor?.(channel) ?? null;
+
+  if (send && !isFutureSend) {
     const pool = await getPool();
     const result = await launchCampaign(
       pool,
@@ -122,9 +129,7 @@ export async function createCampaign(
         channel,
         status: campaign.status,
       },
-      async (payload) => {
-        await deps.enqueue!(channel, payload);
-      },
+      send,
     );
 
     if (!result.ok && result.reason === 'insufficient_funds') {

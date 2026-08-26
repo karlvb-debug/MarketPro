@@ -1,93 +1,28 @@
 // ============================================
-// Workspaces CRUD Lambda
-// GET /workspaces — list user's workspaces
-// POST /workspaces — create workspace
-// PUT /workspaces/{id} — rename
-// DELETE /workspaces/{id} — delete
+// GET    /workspaces      — list the caller's workspaces
+// POST   /workspaces      — create
+// PUT    /workspaces/{id} — rename (admin)
+// DELETE /workspaces/{id} — delete (owner)
+// Thin adapter; the logic lives in @repo/core/api/workspaces.
 // ============================================
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { eq, and } from 'drizzle-orm';
-import { getDb, respond, getUserId, getWorkspaceId, requireRole } from '../lib/db';
-import { workspaces, usersWorkspaces } from '@repo/core/schema';
+import {
+  createWorkspace,
+  deleteWorkspace,
+  listWorkspaces,
+  renameWorkspace,
+} from '@repo/core/api/workspaces';
+import { methodNotAllowed } from '@repo/core/api/result';
+import { adapt, bodyOf } from '../lib/adapt';
 
-export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
-  const method = event.httpMethod;
-  const userId = getUserId(event);
-  if (!userId) return respond(401, { message: 'Unauthorized' });
+export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> =>
+  adapt(event, async (ctx) => {
+    const pathId = event.pathParameters?.id;
 
-  const db = await getDb();
-  const pathId = event.pathParameters?.id;
-  const workspaceId = getWorkspaceId(event);
-
-  try {
-    // GET /workspaces — list workspaces for this user
-    if (method === 'GET' && !pathId) {
-      const rows = await db
-        .select({
-          workspaceId: workspaces.workspaceId,
-          name: workspaces.name,
-          createdAt: workspaces.createdAt,
-          role: usersWorkspaces.role,
-        })
-        .from(usersWorkspaces)
-        .innerJoin(workspaces, eq(usersWorkspaces.workspaceId, workspaces.workspaceId))
-        .where(eq(usersWorkspaces.userId, userId));
-
-      // If user has no workspaces, auto-provision one
-      if (rows.length === 0) {
-        const [newWs] = await db.insert(workspaces).values({ name: 'My Workspace' }).returning();
-        await db.insert(usersWorkspaces).values({
-          userId,
-          workspaceId: newWs.workspaceId,
-          role: 'owner',
-        });
-        return respond(200, { data: [{ ...newWs, role: 'owner' }] });
-      }
-
-      return respond(200, { data: rows });
-    }
-
-    // POST /workspaces — create
-    if (method === 'POST') {
-      const body = JSON.parse(event.body || '{}');
-      const [newWs] = await db.insert(workspaces).values({ name: body.name || 'New Workspace' }).returning();
-      await db.insert(usersWorkspaces).values({
-        userId,
-        workspaceId: newWs.workspaceId,
-        role: 'owner',
-      });
-      return respond(201, { workspaceId: newWs.workspaceId, name: newWs.name });
-    }
-
-    // PUT /workspaces/{id} — rename (requires admin)
-    if (method === 'PUT' && pathId) {
-      // IDOR guard: ensure the URL target matches the authenticated workspace
-      if (pathId !== workspaceId) {
-        return respond(403, { message: 'Forbidden: workspace mismatch' });
-      }
-      const writeDenied = requireRole(event, 'admin');
-      if (writeDenied) return writeDenied;
-      const body = JSON.parse(event.body || '{}');
-      await db.update(workspaces).set({ name: body.name }).where(eq(workspaces.workspaceId, pathId));
-      return respond(200, { message: 'Updated' });
-    }
-
-    // DELETE /workspaces/{id} — requires owner
-    if (method === 'DELETE' && pathId) {
-      // IDOR guard: ensure the URL target matches the authenticated workspace
-      if (pathId !== workspaceId) {
-        return respond(403, { message: 'Forbidden: workspace mismatch' });
-      }
-      const deleteDenied = requireRole(event, 'owner');
-      if (deleteDenied) return deleteDenied;
-      await db.delete(workspaces).where(eq(workspaces.workspaceId, pathId));
-      return respond(204, null);
-    }
-
-    return respond(405, { message: 'Method not allowed' });
-  } catch (err) {
-    console.error('Workspaces error:', err);
-    return respond(500, { message: 'Internal server error' });
-  }
-};
+    if (event.httpMethod === 'GET' && !pathId) return listWorkspaces(ctx);
+    if (event.httpMethod === 'POST') return createWorkspace(ctx, bodyOf(event));
+    if (event.httpMethod === 'PUT' && pathId) return renameWorkspace(ctx, pathId, bodyOf(event));
+    if (event.httpMethod === 'DELETE' && pathId) return deleteWorkspace(ctx, pathId);
+    return methodNotAllowed();
+  });
