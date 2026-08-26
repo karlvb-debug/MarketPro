@@ -12,7 +12,9 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@repo/core": "*",
     "@repo/ui": "*",
+    "@supabase/supabase-js": "^2.112.4",
     "amazon-cognito-identity-js": "^6.3.16",
     "cheerio": "^1.2.0",
     "mjml-browser": "^5.1.0",
