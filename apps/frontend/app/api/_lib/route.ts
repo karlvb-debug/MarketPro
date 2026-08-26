@@ -9,6 +9,7 @@
 
 import { resolveRequestContext, type RequestContext } from '@repo/core/api/context';
 import type { ApiResult } from '@repo/core/api/result';
+import type { RequestMeta } from '@repo/core/api/contacts';
 import { parseBody, type JsonBody } from '@repo/core/api/input';
 import { authProvider } from './auth';
 
@@ -72,3 +73,15 @@ export async function withContext(
 
 /** Next passes dynamic route params as a Promise. */
 export type RouteParams<T> = { params: Promise<T> };
+
+/**
+ * Audit metadata for super-admin impersonation logging. Behind Vercel the
+ * client IP arrives in x-forwarded-for.
+ */
+export function requestMeta(req: Request): RequestMeta {
+  return {
+    ip: req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null,
+    userAgent: req.headers.get('user-agent'),
+    path: new URL(req.url).pathname,
+  };
+}

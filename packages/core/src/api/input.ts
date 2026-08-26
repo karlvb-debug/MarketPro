@@ -57,6 +57,15 @@ export function strArray(body: JsonBody, ...keys: string[]): string[] | undefine
   return undefined;
 }
 
+/** First key holding a plain JSON object (not an array). */
+export function obj(body: JsonBody, ...keys: string[]): Record<string, unknown> | undefined {
+  for (const k of keys) {
+    const v = body[k];
+    if (v && typeof v === 'object' && !Array.isArray(v)) return v as Record<string, unknown>;
+  }
+  return undefined;
+}
+
 /**
  * First key that is present at all, as an opaque value. For jsonb columns,
  * where the payload is arbitrary JSON the API stores verbatim.
