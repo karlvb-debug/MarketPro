@@ -13,21 +13,21 @@
   },
   "dependencies": {
     "@repo/ui": "*",
-    "amazon-cognito-identity-js": "^6.3.16",
+    "amazon-cognito-identity-js": "^6.3.20",
     "cheerio": "^1.2.0",
-    "mjml-browser": "^5.1.0",
-    "next": "^16.2.9",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
+    "mjml-browser": "^5.4.0",
+    "next": "^16.3.2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@playwright/test": "^1.60.0",
+    "@playwright/test": "^1.62.1",
     "@repo/eslint-config": "*",
     "@repo/typescript-config": "*",
     "@types/node": "^22.15.3",
-    "@types/react": "19.2.2",
-    "@types/react-dom": "19.2.2",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
     "eslint": "^9.39.1",
     "typescript": "5.9.2"
   }
