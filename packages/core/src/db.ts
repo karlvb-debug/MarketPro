@@ -30,6 +30,47 @@ function isPlaintextTarget(connectionString: string): boolean {
   return connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
 }
 
+let warnedUnverifiedTls = false;
+
+export interface SslConfig {
+  ca?: string;
+  rejectUnauthorized: boolean;
+}
+
+/**
+ * TLS settings for the connection.
+ *
+ * Set `DATABASE_CA_CERT` to the PEM contents of the provider's CA (Supabase
+ * publishes one per project) and the server certificate is actually verified.
+ * Without it the connection is still encrypted but the certificate is not
+ * checked, which does not stop an attacker who can intercept the connection
+ * from presenting their own — so it warns once per process.
+ *
+ * This was inherited from the RDS deployment, where the database sat inside a
+ * VPC and the exposure was bounded. Over the public internet it is not.
+ */
+export function sslConfig(connectionString: string): SslConfig | undefined {
+  if (isPlaintextTarget(connectionString)) return undefined;
+
+  const ca = process.env.DATABASE_CA_CERT;
+  if (ca) return { ca, rejectUnauthorized: true };
+
+  if (!warnedUnverifiedTls) {
+    warnedUnverifiedTls = true;
+    console.warn(
+      '[db] DATABASE_CA_CERT is not set: the database connection is encrypted ' +
+      'but the server certificate is NOT verified. Set it to the provider CA ' +
+      'to enable verification.',
+    );
+  }
+  return { rejectUnauthorized: false };
+}
+
+/** Test seam: reset the once-per-process warning. */
+export function resetTlsWarning(): void {
+  warnedUnverifiedTls = false;
+}
+
 /**
  * Shared pg connection pool, reused across warm invocations.
  * Used directly by callers that issue raw SQL; everything else goes via getDb().
@@ -43,7 +84,7 @@ export async function getPool(): Promise<Pool> {
     max: 1,              // one concurrent connection per serverless invocation
     idleTimeoutMillis: 60000,
     connectionTimeoutMillis: 10000,
-    ssl: isPlaintextTarget(connectionString) ? undefined : { rejectUnauthorized: false },
+    ssl: sslConfig(connectionString),
   });
   return pool;
 }
