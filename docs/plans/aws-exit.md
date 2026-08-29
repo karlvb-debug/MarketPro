@@ -112,7 +112,10 @@ role; existing workspace scoping stays exactly as-is and stays tested.
   ($10/mo additional-project compute). Note the version gap: local tests run
   against Postgres 16, so M2 must confirm the migrations apply cleanly on 17
   rather than assume it.
-- ☐ Vercel project, Twilio account (+ SendGrid for email).
+- ◐ Vercel project — blocked on the GitHub App repository grant; setup,
+  env-var contract and connection-mode constraints are in
+  `docs/plans/vercel-setup.md`.
+- ☐ Twilio account (+ SendGrid for email).
 - ☐ Secrets as env vars — see `apps/frontend/.env.example` for the contract.
   Two are dashboard-only and cannot be read back through the Management API:
   the **database password** (needed for `DATABASE_URL`) and the
